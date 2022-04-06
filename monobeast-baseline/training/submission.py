@@ -1,0 +1,68 @@
+from pathlib import Path
+
+import torch
+import torch.nn as nn
+import tree
+from ijcai2022nmmo import Team
+
+from torchbeast.monobeast import Net, batch, unbatch
+from torchbeast.neural_mmo.env_wrapper import FeatureParser, NMMOWrapper
+
+
+class MonobeastBaselineTeam(Team):
+    obs_keys = ["agents_frame", "map_frame"]
+    n_action = 8
+    feas_dim = [15]
+
+    def __init__(self,
+                 team_id: str,
+                 env_config=None,
+                 checkpoint_path=None) -> None:
+        super().__init__(team_id, env_config)
+        self.model: nn.Module = Net(None, self.n_action, False)
+        if checkpoint_path is not None:
+            checkpoint = torch.load(checkpoint_path, map_location="cpu")
+            self.model.load_state_dict(checkpoint["model_state_dict"])
+        self.feature_parser = FeatureParser(self.feas_dim)
+
+    def act(self, observations):
+        observations = self.feature_parser.parse(observations)
+        observations = tree.map_structure(
+            lambda x: torch.from_numpy(x).view(1, 1, *x.shape), observations)
+        obs_batch, ids = batch(observations, self.obs_keys)
+        output, _ = self.model(obs_batch)
+        output = unbatch(output, ids)
+        actions = {i: output[i]["action"].item() for i in output}
+        actions = NMMOWrapper._parse_action(actions)
+        return actions
+
+
+class Submission:
+    team_klass = MonobeastBaselineTeam
+    init_params = {
+        "checkpoint_path": (Path(__file__).parent / "checkpoints" /
+                            "step_276703232.pt").resolve().as_posix()
+    }
+
+
+if __name__ == "__main__":
+    from ijcai2022nmmo import CompetitionConfig
+    config = CompetitionConfig()
+
+    from ijcai2022nmmo import RollOut, scripted
+    teams = [
+        MonobeastBaselineTeam(
+            f"MyTeam",
+            config,
+            checkpoint_path=(Path(__file__).parent / "checkpoints" /
+                             "step_276703232.pt").resolve().as_posix())
+    ]
+    teams.extend(
+        [scripted.RandomTeam(f"random-{i}", config) for i in range(15)])
+
+    ro = RollOut(
+        config,
+        teams,
+        show_progress=True,
+    )
+    ro.run(n_timestep=1024, n_episode=1)
