@@ -9,7 +9,7 @@ pip install xxx
 
 
 ## monobeast-baseline
-A modified [monobeast](https://github.com/facebookresearch/ baseline is provided in `monobeast-baseline`. 
+A modified [monobeast](https://github.com/facebookresearch/) baseline is provided in `monobeast-baseline`. 
 
 ### train
 ```
