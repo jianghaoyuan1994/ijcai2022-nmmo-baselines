@@ -1,5 +1,5 @@
 # IJCAI2022-NMMO-BASELINES
-In order to get started with NeuralMMO environments, we provide a variety of baselines agent.
+To get started with NeuralMMO environments and reinforcement learning frameworks, we provide baseline agents.
 
 ## install
 ```
@@ -7,9 +7,6 @@ In order to get started with NeuralMMO environments, we provide a variety of bas
 pip install xxx
 ```
 
-## xxx-baselines
-xxx-baselines provides RL baseline implementations under various frameworks
-More details are available [here](https://github.com/NeuralMMO/baselines)
 
 ## monobeast-baseline
 A modified [monobeast](https://github.com/facebookresearch/ baseline is provided in `monobeast-baseline`. 
@@ -28,3 +25,19 @@ python -m torchbeast.monobeast \
 ```
 
 ### evaluate
+```
+python -m torchbeast.monobeast \
+    --total_steps 1000000000 \
+    --num_actors 4 \
+    --num_learner 1 \
+    --batch_size 32 \
+    --unroll_length 32 \
+    --savedir ./results \
+    --checkpoint_interval 3600 \
+    --xpid nmmo \
+    --mode test
+```
+
+
+## Baselines based on other frameworks
+neuralmmo-baselines provide RL [baselines](https://github.com/NeuralMMO/baselines) implemented using various frameworks, such as [cleanrl](https://github.com/vwxyzjn/cleanrl), [sb3](https://github.com/DLR-RM/stable-baselines3), [rllib](https://github.com/ray-project/ray/tree/master/rllib). These baselines are provided to the participants who is familar with and prefer these RL frameworks. `For the participants without specific preference, we recommend you to use the torchbeast-baseline`.
