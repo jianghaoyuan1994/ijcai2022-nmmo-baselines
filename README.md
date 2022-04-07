@@ -31,7 +31,8 @@ python -m torchbeast.monobeast --mode test --savedir ./results --xpid nmmo
 
 
 ## Baselines based on other frameworks
-The [NeuralMMO-baselines](https://github.com/NeuralMMO/baselines) has impletented some baseline agents based on commonly used RL frameworks, such as [cleanrl](https://github.com/vwxyzjn/cleanrl), [sb3](https://github.com/DLR-RM/stable-baselines3), [rllib](https://github.com/ray-project/ray/tree/master/rllib). These baselines are provided to the participants who is familar with and prefer these frameworks. For people who use these frameworks, we have provided an exmaple submission based on rllib baseline. Choose your favorite way to implement your own agent.
+The [NeuralMMO-baselines](https://github.com/NeuralMMO/baselines) has impletented some baseline agents based on commonly used RL frameworks, such as [cleanrl](https://github.com/vwxyzjn/cleanrl), [sb3](https://github.com/DLR-RM/stable-baselines3), [rllib](https://github.com/ray-project/ray/tree/master/rllib). These baselines are provided to the participants who is familar with and prefer these frameworks. Choose your favorite to implement your own agent.
+<!-- For people who use these frameworks, we have provided an exmaple submission based on rllib baseline. -->
 <!-- `For the participants without specific preference, we recommend you to use the torchbeast-baseline`. -->
 
 
@@ -41,4 +42,4 @@ The [NeuralMMO-baselines](https://github.com/NeuralMMO/baselines) has impletente
 This error is usually encountered due to insufficient memeory. Try smaller `num_actors, batch_size, unroll_length`.
 
 ##### 2. How can I create my own submission?
-For more information, please refer to [submission API](https://github.com/IJCAI2022-NMMO/ijcai2022nmmo#team).
+Please refer to [create submission](https://gitlab.aicrowd.com/neural-mmo/ijcai2022-nmmo-starter-kit/-/tree/readme#1-create-submission).
