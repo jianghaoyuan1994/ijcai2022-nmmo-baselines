@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import torch
 import torch.nn as nn
 import tree
@@ -5,7 +7,6 @@ from ijcai2022nmmo import Team
 
 from torchbeast.monobeast import Net, batch, unbatch
 from torchbeast.neural_mmo.train_wrapper import FeatureParser, TrainWrapper
-from pathlib import Path
 
 
 class MonobeastBaselineTeam(Team):
@@ -33,7 +34,9 @@ class MonobeastBaselineTeam(Team):
         output, _ = self.model(obs_batch)
         output = unbatch(output, ids)
         actions = {i: output[i]["action"].item() for i in output}
-        actions = TrainWrapper._parse_action(actions, list(alive_agents=observations.keys()))
+        actions = TrainWrapper._parse_action(actions,
+                                             alive_agents=list(
+                                                 observations.keys()))
         return actions
 
 
