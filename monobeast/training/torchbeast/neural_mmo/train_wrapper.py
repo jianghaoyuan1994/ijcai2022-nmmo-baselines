@@ -2,7 +2,7 @@ import nmmo
 import numpy as np
 from gym import Wrapper, spaces
 from ijcai2022nmmo import TeamBasedEnv
-from ijcai2022nmmo.scripted import RandomTeam
+from ijcai2022nmmo.scripted import CombatTeam, ForageTeam, RandomTeam
 
 
 class FeatureParser:
@@ -75,7 +75,6 @@ class RewardParser:
 class TrainWrapper(Wrapper):
     MAX_STEP = 1024
     TRAINING_TEAM_IDX = 0
-    SCRIPTED_AGENT = RandomTeam
 
     def __init__(self, env: TeamBasedEnv) -> None:
         super().__init__(env)
@@ -88,8 +87,14 @@ class TrainWrapper(Wrapper):
             spaces.Box(low=0, high=255, shape=(2, 15, 15), dtype=np.float32)
         })
         self.action_space = spaces.Discrete(8)
-        self._scripted_agent = self.SCRIPTED_AGENT(team_id=None,
-                                                   env_config=env.config)
+
+        self._scripted_random = RandomTeam(team_id="random",
+                                           env_config=env.config)
+        self._scripted_forage = ForageTeam(team_id="forage",
+                                           env_config=env.config)
+        self._scripted_combat = CombatTeam(team_id="combat",
+                                           env_config=env.config)
+
         self._dummy_feature = {
             key: np.zeros(shape=val.shape, dtype=val.dtype)
             for key, val in self.observation_space.items()
@@ -105,11 +110,7 @@ class TrainWrapper(Wrapper):
         return obs
 
     def step(self, actions):
-        scripted_decisions = {
-            team_id: self._scripted_agent.act(obs)
-            for team_id, obs in self._prev_raw_obs.items()
-            if team_id != self.TRAINING_TEAM_IDX
-        }
+        scripted_decisions = self._scripted_action(self._prev_raw_obs)
         decisions = {
             self.TRAINING_TEAM_IDX:
             self._parse_action(
@@ -145,6 +146,25 @@ class TrainWrapper(Wrapper):
         if self._step >= self.MAX_STEP:
             done = {key: True for key in done.keys()}
         return obs, reward, done, info
+
+    def _scripted_action(self, observations):
+        decisions = {}
+        tt_id = self.TRAINING_TEAM_IDX
+        for team_id, obs in observations.items():
+            if team_id == tt_id:
+                continue
+            if tt_id < team_id <= tt_id + 7:
+                decisions[team_id] = self._scripted_random.act(obs)
+
+            elif tt_id + 7 < team_id <= tt_id + 12:
+                decisions[team_id] = self._scripted_forage.act(obs)
+
+            elif tt_id + 12 < team_id <= tt_id + 15:
+                decisions[team_id] = self._scripted_combat.act(obs)
+
+            else:
+                raise ValueError(f"invalid team id: {team_id}")
+        return decisions
 
     @staticmethod
     def _parse_action(actions, alive_agents=None):
@@ -185,6 +205,7 @@ class TrainWrapper(Wrapper):
 
 if __name__ == "__main__":
     import time
+
     from ijcai2022nmmo import CompetitionConfig
     env = TrainWrapper(TeamBasedEnv(config=CompetitionConfig()))
     print("agents_frame" in list(env.observation_space.keys()))

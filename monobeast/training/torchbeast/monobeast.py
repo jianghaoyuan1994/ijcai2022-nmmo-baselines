@@ -114,7 +114,7 @@ parser.add_argument("--grad_norm_clipping", default=40.0, type=float,
 logging.basicConfig(
     format=("[%(levelname)s:%(process)d %(module)s:%(lineno)d %(asctime)s] "
             "%(message)s"),
-    level=logging.CRITICAL,
+    level=logging.INFO,
 )
 
 Buffers = typing.Dict[str, typing.List[torch.Tensor]]
