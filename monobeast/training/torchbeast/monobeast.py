@@ -34,7 +34,6 @@ from ijcai2022nmmo import CompetitionConfig, TeamBasedEnv
 from torch import multiprocessing as mp
 from torch import nn
 from torch.nn import functional as F
-from pympler import tracker, muppy, summary
 
 from torchbeast.core import file_writer, prof, vtrace
 from torchbeast.neural_mmo.monobeast_wrapper import \
@@ -207,8 +206,6 @@ def act(
     initial_agent_state_buffers,
 ):
     try:
-        # sum = summary.summarize(muppy.get_objects())
-
         logging.info("Actor %i started.", actor_index)
         timings = prof.Timings()  # Keep track of how fast things are.
 
@@ -223,11 +220,6 @@ def act(
         agent_output_batch, unused_state = model(env_output_batch, agent_state)
         agent_output = unbatch(agent_output_batch, agent_ids)
         while True:
-
-            # debug memory leak
-            # sum_ = summary.summarize(muppy.get_objects())
-            # summary.print_(summary.get_diff(sum_, sum))
-            # sum = sum_
 
             free_indices = [free_queue.get() for _ in range(flags.num_agents)]
             if None in free_indices:
