@@ -34,6 +34,7 @@ from ijcai2022nmmo import CompetitionConfig, TeamBasedEnv
 from torch import multiprocessing as mp
 from torch import nn
 from torch.nn import functional as F
+from pympler import tracker, muppy, summary
 
 from torchbeast.core import file_writer, prof, vtrace
 from torchbeast.neural_mmo.monobeast_wrapper import \
@@ -113,7 +114,7 @@ parser.add_argument("--grad_norm_clipping", default=40.0, type=float,
 logging.basicConfig(
     format=("[%(levelname)s:%(process)d %(module)s:%(lineno)d %(asctime)s] "
             "%(message)s"),
-    level=logging.INFO,
+    level=logging.CRITICAL,
 )
 
 Buffers = typing.Dict[str, typing.List[torch.Tensor]]
@@ -156,6 +157,7 @@ def compute_policy_gradient_loss(logits, actions, advantages, mask=None):
 
 def store(env_output, agent_output, agent_state, buffers: Buffers,
           initial_agent_state_buffers, free_indices, t):
+    # return
     indices_iter = iter(free_indices)
     """Store tensor in buffer."""
     for agent_id in env_output.keys():
@@ -205,6 +207,8 @@ def act(
     initial_agent_state_buffers,
 ):
     try:
+        # sum = summary.summarize(muppy.get_objects())
+
         logging.info("Actor %i started.", actor_index)
         timings = prof.Timings()  # Keep track of how fast things are.
 
@@ -219,6 +223,12 @@ def act(
         agent_output_batch, unused_state = model(env_output_batch, agent_state)
         agent_output = unbatch(agent_output_batch, agent_ids)
         while True:
+
+            # debug memory leak
+            # sum_ = summary.summarize(muppy.get_objects())
+            # summary.print_(summary.get_diff(sum_, sum))
+            # sum = sum_
+
             free_indices = [free_queue.get() for _ in range(flags.num_agents)]
             if None in free_indices:
                 break
@@ -288,8 +298,10 @@ def get_batch(
         key: torch.stack([buffers[key][m] for m in indices], dim=1)
         for key in buffers
     }
-    initial_agent_state = (torch.cat(ts, dim=1) for ts in zip(
-        *[initial_agent_state_buffers[m] for m in indices]))
+    initial_agent_state = tuple()
+    if flags.use_lstm:
+        initial_agent_state = (torch.cat(ts, dim=1) for ts in zip(
+            *[initial_agent_state_buffers[m] for m in indices]))
     timings.time("batch")
     for m in indices:
         free_queue.put(m)
@@ -298,9 +310,10 @@ def get_batch(
         k: t.to(device=flags.device, non_blocking=True)
         for k, t in batch.items()
     }
-    initial_agent_state = tuple(
-        t.to(device=flags.device, non_blocking=True)
-        for t in initial_agent_state)
+    if flags.use_lstm:
+        initial_agent_state = tuple(
+            t.to(device=flags.device, non_blocking=True)
+            for t in initial_agent_state)
     timings.time("device")
     return batch, initial_agent_state
 
@@ -405,8 +418,46 @@ def create_buffers(flags, observation_space, num_actions) -> Buffers:
     buffers: Buffers = {key: [] for key in specs}
     for _ in range(flags.num_buffers):
         for key in buffers:
-            buffers[key].append(torch.empty(**specs[key]).share_memory_())
+            buffers[key].append(torch.zeros(**specs[key]).share_memory_())
     return buffers
+
+
+def start_process(flags, ctx, model, actor_processes, free_queue, full_queue,
+                  buffers, initial_agent_state_buffers):
+    """Periodically restart actor process to prevent OOM, which may be caused by pytorch share_memory"""
+    if len(actor_processes) > 0:
+        logging.critical("Stoping actor process...")
+        for actor in actor_processes:
+            actor.terminate()
+            actor.join()
+            actor.close()
+
+    while not free_queue.empty():
+        free_queue.get()
+    while not full_queue.empty():
+        full_queue.get()
+    for m in range(flags.num_buffers):
+        free_queue.put(m)
+
+    logging.critical("Starting actor process...")
+    actor_processes = []
+    for i in range(flags.num_actors):
+        actor = ctx.Process(
+            target=act,
+            args=(
+                flags,
+                i,
+                free_queue,
+                full_queue,
+                model,
+                buffers,
+                initial_agent_state_buffers,
+            ),
+        )
+        actor.start()
+        actor_processes.append(actor)
+        time.sleep(0.5)
+    return actor_processes
 
 
 def train(flags):  # pylint: disable=too-many-branches, too-many-statements
@@ -450,26 +501,13 @@ def train(flags):  # pylint: disable=too-many-branches, too-many-statements
             t.share_memory_()
         initial_agent_state_buffers.append(state)
 
-    actor_processes = []
     ctx = mp.get_context("fork")
     free_queue = ctx.SimpleQueue()
     full_queue = ctx.SimpleQueue()
 
-    for i in range(flags.num_actors):
-        actor = ctx.Process(
-            target=act,
-            args=(
-                flags,
-                i,
-                free_queue,
-                full_queue,
-                model,
-                buffers,
-                initial_agent_state_buffers,
-            ),
-        )
-        actor.start()
-        actor_processes.append(actor)
+    actor_processes = start_process(flags, ctx, model, [], free_queue,
+                                    full_queue, buffers,
+                                    initial_agent_state_buffers)
 
     learner_model = Net(env.observation_space.shape, env.action_space.n,
                         flags.use_lstm).to(device=flags.device)
@@ -526,9 +564,6 @@ def train(flags):  # pylint: disable=too-many-branches, too-many-statements
         if i == 0:
             logging.info("Batch and learn: %s", timings.summary())
 
-    for m in range(flags.num_buffers):
-        free_queue.put(m)
-
     threads = []
     for i in range(flags.num_learner_threads):
         thread = threading.Thread(target=batch_and_learn,
@@ -548,7 +583,7 @@ def train(flags):  # pylint: disable=too-many-branches, too-many-statements
                 "scheduler_state_dict": scheduler.state_dict(),
                 "flags": vars(flags),
             },
-            checkpointpath.joinpath(f"model_{step}.tar"),
+            checkpointpath.joinpath(f"model_{step}.pt"),
         )
 
     timer = timeit.default_timer
@@ -562,6 +597,10 @@ def train(flags):  # pylint: disable=too-many-branches, too-many-statements
             if timer() - last_checkpoint_time > flags.checkpoint_interval:
                 checkpoint()
                 last_checkpoint_time = timer()
+                actor_processes = start_process(flags, ctx, model, actor_processes,
+                                                free_queue, full_queue,
+                                                buffers,
+                                                initial_agent_state_buffers)
 
             sps = (step - start_step) / (timer() - start_time)
             if stats.get("episode_returns", None):
