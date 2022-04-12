@@ -42,4 +42,6 @@ class MonobeastBaselineTeam(Team):
 
 class Submission:
     team_klass = MonobeastBaselineTeam
-    init_params = {}
+    init_params = {
+        # "checkpoint_path": Path(__file__).parent / "checkpoints" / "model.pt"
+    }
