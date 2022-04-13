@@ -16,6 +16,7 @@ A modified [monobeast](https://github.com/facebookresearch/) baseline is provide
 
 ### train
 ```bash
+cd monobeast/training
 python -m torchbeast.monobeast \
     --total_steps 1000000000 \
     --num_actors 8 \
@@ -29,6 +30,7 @@ python -m torchbeast.monobeast \
 
 ### evaluate
 ```bash
+cd monobeast/training
 python -m torchbeast.monobeast --mode test --savedir ./results --xpid nmmo
 ```
 
