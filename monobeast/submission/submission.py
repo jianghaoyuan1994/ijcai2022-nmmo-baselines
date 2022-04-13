@@ -4,6 +4,7 @@ import torch
 import torch.nn as nn
 import tree
 from ijcai2022nmmo import Team
+from nmmo import config
 
 from torchbeast.monobeast import Net, batch, unbatch
 from torchbeast.neural_mmo.train_wrapper import FeatureParser, TrainWrapper
@@ -16,8 +17,8 @@ class MonobeastBaselineTeam(Team):
 
     def __init__(self,
                  team_id: str,
-                 env_config=None,
-                 checkpoint_path=None) -> None:
+                 env_config: config.Config,
+                 checkpoint_path=None):
         super().__init__(team_id, env_config)
         self.model: nn.Module = Net(None, self.n_action, False)
         if checkpoint_path is not None:

@@ -3,13 +3,16 @@ To get started with NeuralMMO environments and reinforcement learning frameworks
 
 ## install
 ```bash
-pip install git+https://github.com/IJCAI2022-NMMO/ijcai2022nmmo.git
+pip install git+http://gitlab.aicrowd.com/henryz/ijcai2022nmmo.git
 pip install -r requirements.txt
 ```
 
 
 ## monobeast-baseline
 A modified [monobeast](https://github.com/facebookresearch/) baseline is provided in `monobeast/`. 
+- `monobeast/submission/`: Code for submission. 
+    - For successful submission, one must copy all files under this directory and the model checkpoint to [`ijcai2022-nmmo-starter-kit/my-submission/`](https://gitlab.aicrowd.com/neural-mmo/ijcai2022-nmmo-starter-kit/-/tree/main/my-submission).
+- `monobeast/training/`: Code for training.
 
 ### train
 ```bash
