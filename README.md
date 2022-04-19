@@ -1,6 +1,8 @@
 # IJCAI2022-NMMO-BASELINES
 To get started with NeuralMMO environments and reinforcement learning frameworks, we provide some baseline agents.
 
+
+
 ## install
 ```bash
 pip install git+http://gitlab.aicrowd.com/henryz/ijcai2022nmmo.git
@@ -9,6 +11,12 @@ pip install -r requirements.txt
 
 
 ## monobeast-baseline
+
+**Important**: The monobeast baseline is merely a simple RL implementation and weaker than scripted AI. 
+
+>  Change anything you like to make the baseline stronger e.g. **feature parser, reward parser, loss fucntion etc**.
+
+
 A modified [monobeast](https://github.com/facebookresearch/) baseline is provided in `monobeast/`. 
 - `monobeast/my-submission/`: Code for submission. 
     - For successful submission, one must copy all files under this directory and the model checkpoint to [`ijcai2022-nmmo-starter-kit/my-submission/`](https://gitlab.aicrowd.com/neural-mmo/ijcai2022-nmmo-starter-kit/-/tree/main/my-submission).
