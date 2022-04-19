@@ -44,7 +44,7 @@ python -m torchbeast.monobeast --mode test --savedir ./results --xpid nmmo
 
 
 ## Baselines based on other frameworks
-The [NeuralMMO-baselines](https://github.com/NeuralMMO/baselines) has implemented some baseline agents based on commonly used RL frameworks, such as [cleanrl](https://github.com/vwxyzjn/cleanrl), [sb3](https://github.com/DLR-RM/stable-baselines3), [rllib](https://github.com/ray-project/ray/tree/master/rllib). These baselines are provided to the participants who is familiar with and prefer these frameworks. Choose your favorite to implement your own agent.
+The [NeuralMMO-baselines](https://github.com/NeuralMMO/baselines/tree/ijcai-competition) (ijcai-competition branch) has implemented some baseline agents based on commonly used RL frameworks, such as [cleanrl](https://github.com/vwxyzjn/cleanrl), [sb3](https://github.com/DLR-RM/stable-baselines3), [rllib](https://github.com/ray-project/ray/tree/master/rllib). These baselines are provided to the participants who is familiar with and prefer these frameworks. Choose your favorite to implement your own agent.
 
 
 ## FAQ
