@@ -41,6 +41,9 @@ from torchbeast.neural_mmo.monobeast_wrapper import \
 from torchbeast.neural_mmo.net import NMMONet
 from torchbeast.neural_mmo.train_wrapper import TrainWrapper
 
+from utils import checkpoint, load_model
+
+
 to_torch_dtype = {
     "uint8": torch.uint8,
     "int8": torch.int8,
@@ -55,8 +58,8 @@ to_torch_dtype = {
 # yapf: disable
 parser = argparse.ArgumentParser(description="PyTorch Scalable Agent")
 
-parser.add_argument("--env", type=str, default="PongNoFrameskip-v4",
-                    help="Gym environment.")
+# parser.add_argument("--env", type=str, default="PongNoFrameskip-v4",
+#                     help="Gym environment.")
 parser.add_argument("--mode", default="train",
                     choices=["train", "test", "test_render"],
                     help="Training or test mode.")
@@ -122,7 +125,7 @@ Buffers = typing.Dict[str, typing.List[torch.Tensor]]
 def compute_baseline_loss(advantages, mask=None):
     if mask is not None:
         mask = torch.ones_like(advantages)
-    loss = (advantages**2)
+    loss = (advantages ** 2)
     loss *= mask
     return torch.sum(loss) / torch.sum(mask)
 
@@ -197,13 +200,13 @@ def unbatch(agent_output: Dict, agent_ids):
 
 
 def act(
-    flags,
-    actor_index: int,
-    free_queue: mp.SimpleQueue,
-    full_queue: mp.SimpleQueue,
-    model: torch.nn.Module,
-    buffers: Buffers,
-    initial_agent_state_buffers,
+        flags,
+        actor_index: int,
+        free_queue: mp.SimpleQueue,
+        full_queue: mp.SimpleQueue,
+        model: torch.nn.Module,
+        buffers: Buffers,
+        initial_agent_state_buffers,
 ):
     try:
         logging.info("Actor %i started.", actor_index)
@@ -369,7 +372,7 @@ def learn(
         episode_returns = batch["episode_return"][batch["done"]]
         episode_steps = batch["episode_step"][batch["done"]]
         stats = {
-            "episode_returns": tuple(episode_returns.cpu().numpy()),
+            # "episode_returns": tuple(episode_returns.cpu().numpy()),
             "mean_episode_return": torch.mean(episode_returns).item(),
             "mean_episode_step": torch.mean(episode_steps.float()).item(),
             "total_loss": total_loss.item(),
@@ -397,14 +400,14 @@ def create_buffers(flags, observation_space, num_actions) -> Buffers:
         for key, val in observation_space.items()
     }
     specs = dict(
-        reward=dict(size=(T + 1, ), dtype=torch.float32),
-        done=dict(size=(T + 1, ), dtype=torch.bool),
-        episode_return=dict(size=(T + 1, ), dtype=torch.float32),
-        episode_step=dict(size=(T + 1, ), dtype=torch.int32),
+        reward=dict(size=(T + 1,), dtype=torch.float32),
+        done=dict(size=(T + 1,), dtype=torch.bool),
+        episode_return=dict(size=(T + 1,), dtype=torch.float32),
+        episode_step=dict(size=(T + 1,), dtype=torch.int32),
         policy_logits=dict(size=(T + 1, num_actions), dtype=torch.float32),
-        baseline=dict(size=(T + 1, ), dtype=torch.float32),
-        last_action=dict(size=(T + 1, ), dtype=torch.int64),
-        action=dict(size=(T + 1, ), dtype=torch.int64),
+        baseline=dict(size=(T + 1,), dtype=torch.float32),
+        last_action=dict(size=(T + 1,), dtype=torch.int64),
+        action=dict(size=(T + 1,), dtype=torch.int64),
     )
     specs.update(obs_specs)
     buffers: Buffers = {key: [] for key in specs}
@@ -467,8 +470,8 @@ def train(flags):  # pylint: disable=too-many-branches, too-many-statements
     if flags.num_buffers < flags.batch_size:
         raise ValueError("num_buffers should be larger than batch_size")
 
-    T = flags.unroll_length
-    B = flags.batch_size
+    T = flags.unroll_length  # 64
+    B = flags.batch_size  # 32
 
     flags.device = None
     if not flags.disable_cuda and torch.cuda.is_available():
@@ -517,6 +520,11 @@ def train(flags):  # pylint: disable=too-many-branches, too-many-statements
 
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
 
+    load_model(
+        "/home/jianghaoyuan/Desktop/ijcai2022-nmmo-baselines/monobeast/training/4_24_tile_cnn/nmmo/model_4198400.pt",
+        model, optimizer, scheduler
+        )
+
     logger = logging.getLogger("logfile")
     stat_keys = [
         "total_loss",
@@ -527,6 +535,7 @@ def train(flags):  # pylint: disable=too-many-branches, too-many-statements
         "entropy_loss",
     ]
     logger.info("# Step\t%s", "\t".join(stat_keys))
+
 
     step, stats = 0, {}
 
@@ -560,23 +569,9 @@ def train(flags):  # pylint: disable=too-many-branches, too-many-statements
     for i in range(flags.num_learner_threads):
         thread = threading.Thread(target=batch_and_learn,
                                   name="batch-and-learn-%d" % i,
-                                  args=(i, ))
+                                  args=(i,))
         thread.start()
         threads.append(thread)
-
-    def checkpoint():
-        if flags.disable_checkpoint:
-            return
-        logging.info("Saving checkpoint to %s", checkpointpath)
-        torch.save(
-            {
-                "model_state_dict": model.state_dict(),
-                "optimizer_state_dict": optimizer.state_dict(),
-                "scheduler_state_dict": scheduler.state_dict(),
-                "flags": vars(flags),
-            },
-            checkpointpath.joinpath(f"model_{step}.pt"),
-        )
 
     timer = timeit.default_timer
     try:
@@ -587,7 +582,7 @@ def train(flags):  # pylint: disable=too-many-branches, too-many-statements
             time.sleep(5)
 
             if timer() - last_checkpoint_time > flags.checkpoint_interval:
-                checkpoint()
+                checkpoint(flags, logging, checkpointpath, model, optimizer, step, scheduler)
                 last_checkpoint_time = timer()
                 actor_processes = start_process(flags, ctx, model, actor_processes,
                                                 free_queue, full_queue,
@@ -595,7 +590,7 @@ def train(flags):  # pylint: disable=too-many-branches, too-many-statements
                                                 initial_agent_state_buffers)
 
             sps = (step - start_step) / (timer() - start_time)
-            if stats.get("episode_returns", None):
+            if stats.get("mean_episode_return", None):
                 mean_return = ("Return per episode: %.1f. " %
                                stats["mean_episode_return"])
             else:
@@ -621,7 +616,7 @@ def train(flags):  # pylint: disable=too-many-branches, too-many-statements
         for actor in actor_processes:
             actor.join(timeout=1)
 
-    checkpoint()
+    checkpoint(flags, logging, checkpointpath, model, optimizer, step, scheduler)
     plogger.close()
 
 
@@ -684,6 +679,7 @@ Net = NMMONet
 
 def create_env(flags):
     cfg = CompetitionConfig()
+    cfg.NMAPS = 400  # im: add random map nums
     if flags.mode == "test_render":
         cfg.RENDER = True
     return TrainWrapper(TeamBasedEnv(config=cfg))

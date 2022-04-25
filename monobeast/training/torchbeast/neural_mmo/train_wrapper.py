@@ -5,10 +5,12 @@ from ijcai2022nmmo import TeamBasedEnv
 from ijcai2022nmmo.scripted import CombatTeam, ForageTeam, RandomTeam
 
 
-class FeatureParser:
+class FeatureParser:  # 环境obs解析
     def __init__(self, feas_dim):
 
         self.map_size = feas_dim[0]
+        self.channel_num = 6  # im
+        self.onehot = np.eye(self.channel_num)
 
     def parse(self, obs):
 
@@ -18,20 +20,20 @@ class FeatureParser:
 
             obs_agents = obs[entity]["Entity"]["Continuous"]
             agents_frame = obs_agents.reshape(-1) / np.linalg.norm(
-                obs_agents.reshape(-1))
+                obs_agents.reshape(-1))   #TODO normalize
 
             obs_map = obs[entity]["Tile"]["Continuous"]
-            local_map = np.zeros((1, self.map_size, self.map_size),
+            local_map = np.zeros((self.channel_num, self.map_size, self.map_size),
                                  dtype=np.float32)
             agent_map = np.zeros((1, self.map_size, self.map_size),
                                  dtype=np.float32)
 
-            init_R = obs_map[0][2]
-            init_C = obs_map[0][3]
+            init_R = obs_map[0][2]  # 左上角loc
+            init_C = obs_map[0][3]  # 左上角loc
 
             for line in obs_map:
-                local_map[0][int(line[2] - init_R),
-                             int(line[3] - init_C)] = line[1]
+                local_map[:, int(line[2] - init_R),
+                             int(line[3] - init_C)] = self.onehot[int(line[1])]
                 if line[0] != 0:
                     agent_map[0][int(line[2] - init_R),
                                  int(line[3] - init_C)] = 1
@@ -84,7 +86,7 @@ class TrainWrapper(Wrapper):
             "agents_frame":
             spaces.Box(low=0, high=255, shape=(1300, ), dtype=np.float32),
             "map_frame":
-            spaces.Box(low=0, high=255, shape=(2, 15, 15), dtype=np.float32)
+            spaces.Box(low=0, high=255, shape=(7, 15, 15), dtype=np.float32)
         })
         self.action_space = spaces.Discrete(8)
 
@@ -105,12 +107,12 @@ class TrainWrapper(Wrapper):
         obs = raw_obs[self.TRAINING_TEAM_IDX]  # select training team
         obs = self.feature_parser.parse(obs)
         self.agents = list(obs.keys())
-        self._prev_raw_obs = raw_obs
+        self._prev_raw_obs = raw_obs  # 判断生存
         self._step = 0
         return obs
 
     def step(self, actions):
-        scripted_decisions = self._scripted_action(self._prev_raw_obs)
+        scripted_decisions = self._scripted_action(self._prev_raw_obs)  # todo  联盟学习and self-play
         decisions = {
             self.TRAINING_TEAM_IDX:
             self._parse_action(
@@ -131,6 +133,11 @@ class TrainWrapper(Wrapper):
             reward = self.reward_parser.parse(
                 self._prev_raw_obs[self.TRAINING_TEAM_IDX],
                 raw_obs[self.TRAINING_TEAM_IDX])
+            # for k, v in reward_.items():
+            #     if k in reward:
+            #         reward[k] += v
+            #     else:
+            #         reward[k] = v
         else:
             obs, reward, done, info = {}, {}, {}, {}
 
