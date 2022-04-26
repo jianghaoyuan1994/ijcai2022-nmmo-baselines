@@ -52,7 +52,8 @@ to_torch_dtype = {
     "int64": torch.int64,
     "float16": torch.float16,
     "float32": torch.float32,
-    "float64": torch.float64,
+    # "float64": torch.float64,
+    "bool": torch.bool
 }
 
 # yapf: disable
@@ -184,7 +185,7 @@ def batch(env_output: Dict, filter_keys: List[str]):
             if key in filter_keys:
                 obs_batch[key].append(val)
     for key, val in obs_batch.items():
-        obs_batch[key] = torch.cat(val, dim=1)
+        obs_batch[key] = torch.cat(val, dim=1)  # todo 这里是8个agent zaiyiqi,keyizai model limian jinxing feature agg
 
     return obs_batch, agent_ids
 
@@ -520,10 +521,10 @@ def train(flags):  # pylint: disable=too-many-branches, too-many-statements
 
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
 
-    load_model(
-        "/home/jianghaoyuan/Desktop/ijcai2022-nmmo-baselines/monobeast/training/4_24_tile_cnn/nmmo/model_4198400.pt",
-        model, optimizer, scheduler
-        )
+    # load_model(
+    #     "/home/jianghaoyuan/Desktop/ijcai2022-nmmo-baselines/monobeast/training/4_24_tile_cnn/nmmo/model_4198400.pt",
+    #     model, optimizer, scheduler
+    #     )
 
     logger = logging.getLogger("logfile")
     stat_keys = [

@@ -11,6 +11,7 @@ class FeatureParser:  # 环境obs解析
         self.map_size = feas_dim[0]
         self.channel_num = 6  # im
         self.onehot = np.eye(self.channel_num)
+        self.onehot_team = np.eye(16)
 
     def parse(self, obs):
 
@@ -19,8 +20,10 @@ class FeatureParser:  # 环境obs解析
         for entity in obs.keys():
 
             obs_agents = obs[entity]["Entity"]["Continuous"]
-            agents_frame = obs_agents.reshape(-1) / np.linalg.norm(
-                obs_agents.reshape(-1))   #TODO normalize
+            now_time = max(obs_agents[:, 8])
+
+            # agents_frame = obs_agents.reshape(-1) / np.linalg.norm(
+            #     obs_agents.reshape(-1))   #TODO normalize
 
             obs_map = obs[entity]["Tile"]["Continuous"]
             local_map = np.zeros((self.channel_num, self.map_size, self.map_size),
@@ -38,11 +41,37 @@ class FeatureParser:  # 环境obs解析
                     agent_map[0][int(line[2] - init_R),
                                  int(line[3] - init_C)] = 1
 
+            obs_emb = np.zeros((100, 27), dtype="float32")
+            index = 0
+            while index < 100:
+                value = obs_agents[index]
+                if value[0] == 0:
+                    break
+                entity_in = 0 if value[1] < 0 else 1
+                level_in = value[3] / 10
+                team_in = self.onehot_team[int(value[4])] if value[4] > 0 else np.zeros(16)
+                r_in = (value[5] - 64) / 128
+                c_in = (value[6] - 64) / 128
+                dr_in = (r_in-init_R) / 10
+                dc_in = (c_in-init_C) / 10
+                alive_in = 0 if value[8] < now_time else 1
+                food_in = value[9] / 10   # 最大与等级相等
+                water_in = value[10] / 10  # 最大与等级相等
+                health_in = value[11] / 10  # 最大与等级相等  todo Add relative value of integral
+                freezed_in = value[12]   # todo 加入目前freezed了多久
+                obs_emb[index, :] = np.hstack([entity_in, level_in, team_in,r_in, c_in, dr_in, dc_in,
+                                               alive_in,food_in, water_in, health_in, freezed_in])
+
+                index += 1
+
+            mask = np.array([0 if i < index else 1 for i in range(100)], dtype="bool")
+
             map_frame = np.concatenate([local_map, agent_map])
 
             frame_list[entity] = {
-                "agents_frame": agents_frame,
-                "map_frame": map_frame
+                "obs_emb": obs_emb,
+                "map_frame": map_frame,
+                "mask": mask
             }
 
         return frame_list
@@ -83,10 +112,12 @@ class TrainWrapper(Wrapper):
         self.feature_parser = FeatureParser(feas_dim=[15])
         self.reward_parser = RewardParser()
         self.observation_space = spaces.Dict({
-            "agents_frame":
-            spaces.Box(low=0, high=255, shape=(1300, ), dtype=np.float32),
+            "obs_emb":
+            spaces.Box(low=-10, high=255, shape=(100, 27), dtype=np.float32),
             "map_frame":
-            spaces.Box(low=0, high=255, shape=(7, 15, 15), dtype=np.float32)
+            spaces.Box(low=0, high=255, shape=(7, 15, 15), dtype=np.float32),
+            "mask":
+            spaces.Box(low=0, high=1, shape=(100, 1), dtype=np.bool),
         })
         self.action_space = spaces.Discrete(8)
 
@@ -101,6 +132,24 @@ class TrainWrapper(Wrapper):
             key: np.zeros(shape=val.shape, dtype=val.dtype)
             for key, val in self.observation_space.items()
         }
+
+    # def reward(self, player):  # todo explore reward and https://neuralmmo.github.io/build/html/rst/tutorial.html#icon-rewards-tasks
+    #     # Default survival reward
+    #     reward, info = super().reward(player)
+    #
+    #     # Inject exploration attribute into player
+    #     if not hasattr(player, 'exploration'):
+    #         player.exploration = 0
+    #
+    #     # Historical exploration already part of player state
+    #     exploration = player.history.exploration
+    #
+    #     # Only reward agents for distance increment
+    #     # over previous farthest exploration
+    #     if exploration > player.exploration:
+    #         reward += 0.05 * (exploration - player.exploration)
+    #
+    #     return reward, info
 
     def reset(self):
         raw_obs = super().reset()
