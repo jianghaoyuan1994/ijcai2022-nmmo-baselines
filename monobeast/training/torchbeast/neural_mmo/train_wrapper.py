@@ -59,7 +59,7 @@ class FeatureParser:  # 环境obs解析
                     agent_map[0][int(line[2] - init_R),
                                  int(line[3] - init_C)] = line[0]
 
-            obs_num_part = np.zeros((100, 45), dtype="float32")
+            obs_num_part = np.zeros((100, 10), dtype="float32")
             index = 0
             entity_loc = []
             entity_id = []
@@ -84,16 +84,18 @@ class FeatureParser:  # 环境obs解析
                 team_in_ = value[4] if value[4] > 0 else -1
                 team_in.append(team_in_)
 
-                r_in = (value[5] - 64) / 128
-                c_in = (value[6] - 64) / 128
+                r_in = value[5]
+                c_in = value[6]
 
                 dr_in = (r_in-init_R)
                 dc_in = (c_in-init_C)
-                assert -8 < dc_in < 8 and -8 < dr_in < 8
+                assert 0 <= dc_in < 15 and 0 <= dr_in < 15, "{}-{}-{}-{}-{}".format(r_in, init_R, c_in, init_C, obs[entity])
                 entity_loc.append([dc_in, dc_in])
 
                 dc_in /= 10
                 dr_in /= 10
+                r_in = (r_in - 64) / 128
+                c_in = (c_in - 64) / 128
                 alive_in = 0 if value[8] < self.now_time else 1
                 food_in = value[9] / 10   # 最大与等级相等
                 water_in = value[10] / 10  # 最大与等级相等
@@ -112,7 +114,7 @@ class FeatureParser:  # 环境obs解析
             attack_id = np.array(attack_id, dtype='int')
             entity_in = np.array(entity_in, dtype='int')
 
-            map_frame = np.concatenate([local_map, agent_map])
+            # map_frame = np.concatenate([local_map, agent_map])
 
             # valid action
             for i, (r, c) in enumerate(self.NEIGHBOR):
@@ -121,7 +123,8 @@ class FeatureParser:  # 环境obs解析
 
             frame_list[entity] = {
                 "obs_emb": obs_num_part,
-                "map_frame": map_frame,
+                "local_map": local_map,
+                "agent_map": agent_map,
                 "mask": mask,
                 "entity_loc": entity_loc,
                 "entity_id": entity_id,
