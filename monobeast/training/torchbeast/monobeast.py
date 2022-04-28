@@ -72,8 +72,8 @@ parser.add_argument("--disable_checkpoint", action="store_true",
                     help="Disable saving checkpoint.")
 parser.add_argument("--savedir", default="~/logs/torchbeast",
                     help="Root dir where experiment data will be saved.")
-parser.add_argument("--num_actors", default=4, type=int, metavar="N",
-                    help="Number of actors (default: 4).")
+parser.add_argument("--num_actors", default=1, type=int, metavar="N",
+                    help="Number of actors (default: 1).")
 parser.add_argument("--total_steps", default=100000, type=int, metavar="T",
                     help="Total environment steps to train for.")
 parser.add_argument("--batch_size", default=8, type=int, metavar="B",
@@ -621,58 +621,58 @@ def train(flags):  # pylint: disable=too-many-branches, too-many-statements
     plogger.close()
 
 
-def test(flags, num_episodes: int = 10):
-    if flags.xpid is None:
-        raise ValueError("xpid is None.")
-    checkpoint_dir = Path(flags.savedir).joinpath(flags.xpid)
-    all_checkpoint = glob.glob(
-        checkpoint_dir.joinpath("model_*").resolve().as_posix())
-    if not all_checkpoint:
-        raise RuntimeError(
-            f"Can not found any checkpoint in {checkpoint_dir}.")
-    checkpointpath = sorted(all_checkpoint, key=os.path.getmtime,
-                            reverse=True)[0]
-    logging.info(f"Checkpoint path: {checkpointpath}")
-    gym_env = create_env(flags)
-    env = Environment(gym_env)
-    model = Net(gym_env.observation_space.shape, gym_env.action_space.n,
-                flags.use_lstm)
-    model.eval()
-    checkpoint = torch.load(checkpointpath, map_location="cpu")
-    model.load_state_dict(checkpoint["model_state_dict"])
-
-    observation = env.initial()
-    returns = []
-    steps = []
-
-    while len(returns) < num_episodes:
-        if flags.mode == "test_render":
-            env.gym_env.render()
-        observation_batch, agent_ids = batch(observation,
-                                             gym_env.observation_space.keys())
-        agent_outputs = model(observation_batch)
-        agent_output_batch, _ = agent_outputs
-        agent_output = unbatch(agent_output_batch, agent_ids)
-        actions = {
-            agent_id: agent_output[agent_id]["action"].item()
-            for agent_id in agent_output
-        }
-        observation = env.step(actions)
-        done = all(o["done"].item() for _, o in observation.items())
-        if done:
-            mean_episode_step = np.mean(
-                [o["episode_step"].item() for _, o in observation.items()])
-            mean_episode_return = np.mean(
-                [o["episode_return"].item() for _, o in observation.items()])
-            steps.append(mean_episode_step)
-            returns.append(mean_episode_return)
-            logging.info(
-                f"Episode_step: {mean_episode_step}, episode_return:{mean_episode_return}."
-            )
-    env.close()
-    logging.info(
-        f"[Finished] Mean episode_step:{np.mean(steps)}, mean episode_return:{np.mean(returns)}."
-    )
+# def test(flags, num_episodes: int = 10):
+#     if flags.xpid is None:
+#         raise ValueError("xpid is None.")
+#     checkpoint_dir = Path(flags.savedir).joinpath(flags.xpid)
+#     all_checkpoint = glob.glob(
+#         checkpoint_dir.joinpath("model_*").resolve().as_posix())
+#     if not all_checkpoint:
+#         raise RuntimeError(
+#             f"Can not found any checkpoint in {checkpoint_dir}.")
+#     checkpointpath = sorted(all_checkpoint, key=os.path.getmtime,
+#                             reverse=True)[0]
+#     logging.info(f"Checkpoint path: {checkpointpath}")
+#     gym_env = create_env(flags)
+#     env = Environment(gym_env)
+#     model = Net(gym_env.observation_space.shape, gym_env.action_space.n,
+#                 flags.use_lstm)
+#     model.eval()
+#     checkpoint = torch.load(checkpointpath, map_location="cpu")
+#     model.load_state_dict(checkpoint["model_state_dict"])
+#
+#     observation = env.initial()
+#     returns = []
+#     steps = []
+#
+#     while len(returns) < num_episodes:
+#         if flags.mode == "test_render":
+#             env.gym_env.render()
+#         observation_batch, agent_ids = batch(observation,
+#                                              gym_env.observation_space.keys())
+#         agent_outputs = model(observation_batch)
+#         agent_output_batch, _ = agent_outputs
+#         agent_output = unbatch(agent_output_batch, agent_ids)
+#         actions = {
+#             agent_id: agent_output[agent_id]["action"].item()
+#             for agent_id in agent_output
+#         }
+#         observation = env.step(actions)
+#         done = all(o["done"].item() for _, o in observation.items())
+#         if done:
+#             mean_episode_step = np.mean(
+#                 [o["episode_step"].item() for _, o in observation.items()])
+#             mean_episode_return = np.mean(
+#                 [o["episode_return"].item() for _, o in observation.items()])
+#             steps.append(mean_episode_step)
+#             returns.append(mean_episode_return)
+#             logging.info(
+#                 f"Episode_step: {mean_episode_step}, episode_return:{mean_episode_return}."
+#             )
+#     env.close()
+#     logging.info(
+#         f"[Finished] Mean episode_step:{np.mean(steps)}, mean episode_return:{np.mean(returns)}."
+#     )
 
 
 Net = NMMONet

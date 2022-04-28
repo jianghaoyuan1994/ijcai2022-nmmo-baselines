@@ -12,14 +12,28 @@ class FeatureParser:  # 环境obs解析
     n_move_actions = 5  # 0不动 1上 2下 3左 4右
     NEIGHBOR = [(6, 7), (8, 7), (7, 8), (7, 6)]  # north, south, east, west
     OBSTACLE = (0, 1, 5) # lava, water, stone
+    n_attack_actions = 4
     feature_spec = {
-        "terrain": spaces.Box(low=0, high=6, shape=(15, 15), dtype=np.int64),
-        "camp": spaces.Box(low=0, high=4, shape=(15, 15), dtype=np.int64),
-        "entity": spaces.Box(low=0,
-                             high=4,
-                             shape=(7, 15, 15),
-                             dtype=np.float32),
-        "va": spaces.Box(low=0, high=2, shape=(5, ), dtype=np.int64),
+        # "terrain": spaces.Box(low=0, high=6, shape=(15, 15), dtype=np.int64),
+        # "camp": spaces.Box(low=0, high=4, shape=(15, 15), dtype=np.int64),
+        # "entity": spaces.Box(low=0,
+        #                      high=4,
+        #                      shape=(7, 15, 15),
+        #                      dtype=np.float32),
+        # "va": spaces.Box(low=0, high=2, shape=(5, ), dtype=np.int64),
+        "obs_emb": spaces.Box(low=-100, high=100, shape=(100, 14), dtype=np.float32),
+        "local_map": spaces.Box(low=-100, high=100, shape=(15, 15), dtype=np.float32),
+        "agent_map": spaces.Box(low=-100, high=100, shape=(1, 15, 15), dtype=np.float32),
+        "mask": spaces.Box(low=0, high=1, shape=(100,), dtype=np.int64),
+        "entity_loc": spaces.Box(low=-200, high=200, shape=(100, 2), dtype=np.int64),
+        "entity_id": spaces.Box(low=0, high=200, shape=(100,), dtype=np.int64),
+        "team_in": spaces.Box(low=0, high=17, shape=(100,), dtype=np.int64),
+        "attack_id": spaces.Box(low=0, high=200, shape=(100,), dtype=np.int64),
+        "entity_in": spaces.Box(low=0, high=17, shape=(100,), dtype=np.int64),
+        "va_move": spaces.Box(low=0, high=200, shape=(5,), dtype=np.int64),
+        "meleeable": spaces.Box(low=0, high=200, shape=(100,), dtype=np.int64),
+        "rangeable": spaces.Box(low=0, high=200, shape=(100,), dtype=np.int64),
+        "magicable": spaces.Box(low=0, high=200, shape=(100,), dtype=np.int64)
     }
 
     def __init__(self, feas_dim):
@@ -27,8 +41,8 @@ class FeatureParser:  # 环境obs解析
         self.map_size = feas_dim[0]
         # self.channel_num = 6  # im
         # self.onehot = np.eye(self.channel_num)  # todo move to model
-        self.onehot_team = np.eye(17)
-        self.onehot_index = np.eye(9)
+        # self.onehot_team = np.eye(17)
+        # self.onehot_index = np.eye(9)
         self.now_time = 0
 
     def parse(self, obs):
@@ -37,6 +51,8 @@ class FeatureParser:  # 环境obs解析
 
         for entity in obs.keys():
             va_move = np.ones(self.n_move_actions, dtype=np.int64)
+            # va_attack = np.zeros(self.n_attack_actions, dtype=np.int64)
+            # va_attack_id = []
             obs_agents = obs[entity]["Entity"]["Continuous"]
             self.now_time = max(max(obs_agents[:, 8]), self.now_time)
 
@@ -51,6 +67,8 @@ class FeatureParser:  # 环境obs解析
 
             init_R = obs_map[0][2]  # 左上角loc
             init_C = obs_map[0][3]  # 左上角loc
+            agent_locR = obs_map[112][2]
+            agent_locC = obs_map[112][3]
 
             for line in obs_map:
                 local_map[int(line[2] - init_R),
@@ -59,29 +77,33 @@ class FeatureParser:  # 环境obs解析
                     agent_map[0][int(line[2] - init_R),
                                  int(line[3] - init_C)] = line[0]
 
-            obs_num_part = np.zeros((100, 10), dtype="float32")
+            obs_num_part = np.zeros((100, 14), dtype="float32")
             index = 0
             entity_loc = []
             entity_id = []
             entity_in = []
             attack_id = []
             team_in = []
+            magicable = []
+            rangeable = []
+            meleeable = []
             while index < 100:
+                is_mine = 1 if index ==0 else 0
                 value = obs_agents[index]
                 if value[0] == 0:
                     break
 
                 entity_id.append(value[1])
 
-                entity_in_ = -1 if value[1] < 0 else value[1] % 16 - 1
+                entity_in_ = -1 if value[1] < 0 else value[1] % 16 -1  #与time
                 entity_in.append(entity_in_)
 
-                attack_id_ = -1 if value[2] < 0 else value[2] % 16 - 1
+                attack_id_ = -1 if value[2] < 0 else value[2] // 16 # todo 查看
                 attack_id.append(attack_id_)
 
                 level_in = value[3] / 10
 
-                team_in_ = value[4] if value[4] > 0 else -1
+                team_in_ = value[4] if value[4] > 0 else -1  # todo 查看
                 team_in.append(team_in_)
 
                 r_in = value[5]
@@ -92,6 +114,32 @@ class FeatureParser:  # 环境obs解析
                 assert 0 <= dc_in < 15 and 0 <= dr_in < 15, "{}-{}-{}-{}-{}".format(r_in, init_R, c_in, init_C, obs[entity])
                 entity_loc.append([dc_in, dc_in])
 
+                # 攻击距离
+                if team_in_ == 0:
+                    is_attack = np.zeros(3)
+                else:
+                    min_d = min(abs(r_in-agent_locR), abs(c_in-agent_locC))
+                    if min_d <= 4:
+                        magic_attack = 1
+                        magicable.append(value[1])
+                    else:
+                        magic_attack = 0
+
+                    if min_d <= 3:
+                        range_attack = 1
+                        rangeable.append(value[1])
+                    else:
+                        range_attack = 0
+
+                    if min_d <= 1:
+                        melee_attack = 1
+                        meleeable.append(value[1])
+                    else:
+                        melee_attack = 0
+
+                    is_attack = np.array([melee_attack, range_attack, magic_attack])
+
+
                 dc_in /= 10
                 dr_in /= 10
                 r_in = (r_in - 64) / 128
@@ -101,18 +149,22 @@ class FeatureParser:  # 环境obs解析
                 water_in = value[10] / 10  # 最大与等级相等
                 health_in = value[11] / 10  # 最大与等级相等  todo Add relative value of integral
                 freezed_in = value[12]   # todo 加入目前freezed了多久
-                obs_num_part[index, :] = np.hstack([level_in, r_in, c_in, dr_in, dc_in,
-                                                    alive_in, food_in, water_in, health_in,
+                obs_num_part[index, :] = np.hstack([level_in, r_in, c_in, dr_in, dc_in, is_mine,
+                                                    alive_in, food_in, water_in, health_in, is_attack,
                                                     freezed_in])
 
                 index += 1
 
             mask = np.array([0 if i < index else 1 for i in range(100)], dtype="bool")
-            entity_loc = np.array(entity_loc, dtype='int')
-            entity_id = np.array(entity_id, dtype='int')
-            team_in = np.array(team_in, dtype='int')
-            attack_id = np.array(attack_id, dtype='int')
-            entity_in = np.array(entity_in, dtype='int')
+            entity_loc = np.pad(np.array(entity_loc, dtype='int'), (0, 100-len(entity_loc)), constant_values=101)
+            entity_id = np.pad(np.array(entity_id, dtype='int'), (0, 100-len(entity_id)), constant_values=101)
+            team_in = np.pad(np.array(team_in, dtype='int'), (0, 100-len(team_in)), constant_values=101)
+            attack_id = np.pad(np.array(attack_id, dtype='int'), (0, 100-len(attack_id)), constant_values=101)
+            entity_in = np.pad(np.array(entity_in, dtype='int'), (0, 100-len(entity_in)), constant_values=101)
+
+            meleeable = np.pad(np.array(meleeable, dtype='int'), (0, 100-len(meleeable)), constant_values=101)
+            rangeable = np.pad(np.array(rangeable, dtype='int'), (0, 100-len(rangeable)), constant_values=101)
+            magicable = np.pad(np.array(magicable, dtype='int'), (0, 100-len(magicable)), constant_values=101)
 
             # map_frame = np.concatenate([local_map, agent_map])
 
@@ -131,7 +183,10 @@ class FeatureParser:  # 环境obs解析
                 "team_in": team_in,
                 "attack_id": attack_id,
                 "entity_in": entity_in,
-                "va_move": va_move
+                "va_move": va_move,
+                "meleeable": meleeable,
+                "rangeable": rangeable,
+                "magicable": magicable
             }
 
         return frame_list
@@ -319,7 +374,6 @@ if __name__ == "__main__":
 
     from ijcai2022nmmo import CompetitionConfig
     env = TrainWrapper(TeamBasedEnv(config=CompetitionConfig()))
-    print("agents_frame" in list(env.observation_space.keys()))
     for i in range(10):
         start, step = time.time(), 0
         env.reset()

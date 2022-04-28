@@ -44,7 +44,7 @@ def conv2d_block(
     xavier_normal_(block[-1].weight)
     if activation is not None:
         block.append(activation)
-    return sequential_pack(*block)
+    return sequential_pack(block)
 
 
 class ResBlock(nn.Module):
@@ -127,7 +127,7 @@ class EntityEncoder(nn.Module):
         elif self.whole_cfg.model.entity_reduce_type == 'attention_pool_add_num':
             self.attention_pool = AttentionPool(key_dim=self.cfg.output_dim, head_num=2, output_dim=self.cfg.output_dim, max_num=MAX_ENTITY_NUM + 1)
 
-    def forward(self, x: Dict[str, Tensor], entity_num):
+    def forward(self, x, entity_num):
         entity_embedding = []
         for k, item in self.cfg.module.items():
             assert k in x.keys(), '{} not in {}'.format(k, x.keys())
