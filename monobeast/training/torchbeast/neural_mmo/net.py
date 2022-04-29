@@ -181,7 +181,7 @@ class NMMONet(nn.Module):
         self.spatialEncoder = SpatialEncoder()
         self.core = nn.Linear(512 + 8 * 15 * 15, 512)
 
-        self.unit_nn = nn.Linear(27, 48)
+        self.unit_nn = nn.Linear(77, 48)
         self.unit_transformer = nn.TransformerEncoder(
             nn.TransformerEncoderLayer(d_model=48, nhead=4, dim_feedforward=96, batch_first=True),
             num_layers=3)
@@ -198,12 +198,37 @@ class NMMONet(nn.Module):
 
     def forward(self, input_dict, state=()):
         # [T, B, ...]
-        x1, x2, mask = input_dict["obs_emb"], input_dict["map_frame"], input_dict["mask"]
+        # print(input_dict.keys())
+        agent_map, entity_id, entity_in, rangeable, team_in, va_move, \
+        obs_emb, meleeable, mask, magicable, local_map = \
+            input_dict["agent_map"], input_dict["entity_id"], input_dict["entity_in"], \
+            input_dict["rangeable"], input_dict["team_in"], input_dict["va_move"], \
+            input_dict["obs_emb"], input_dict["meleeable"], input_dict["mask"], \
+            input_dict["magicable"], input_dict["local_map"]
+
+        local_map = F.one_hot(local_map, num_classes=6).permute(0, 1, 4, 2, 3)  # T B C H W
+        local_map = torch.flatten(local_map, 0, 1)
+        map_emb = torch.cat([agent_map.flatten(0, 1), local_map], dim=1)  # T*B C 15 15
+        # print(map_emb.shape)
+
+        team_in = F.one_hot(team_in, num_classes=17).flatten(0, 1)   # T*B 100 17
+        entity_in = F.one_hot(entity_in, num_classes=9).flatten(0, 1)  # T*B 100 9
+        obs_emb = obs_emb.flatten(0, 1)  # T*B 100 51
+        entity_emb = torch.cat([obs_emb, entity_in, team_in], dim=2)   # T*B 100 77
+        # print(entity_emb.shape)
+        print(entity_emb[0, -5:, :])
+        mask = mask.flatten(0, 1)
+        entity_emb = self.unit_nn(entity_emb)
+        print(entity_emb.shape)
+        entity_emb = self.unit_transformer(entity_emb, src_key_padding_mask=mask)
+        print(entity_emb.shape)
+        print(entity_emb[0, -5:, :])
+
         T, B, *_ = x1.shape
         x1 = torch.flatten(x1, 0, 1)
-        x1 = self.unit_nn(x1)
+
         mask = torch.flatten(mask, 0, 1)
-        x1 = self.unit_transformer(x1, src_key_padding_mask=mask)
+
         print(x1.shape, mask.shape)
         x1 = torch.masked_select(x1, mask)
         print(x1.shape)

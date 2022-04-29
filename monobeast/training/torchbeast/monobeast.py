@@ -184,8 +184,12 @@ def batch(env_output: Dict, filter_keys: List[str]):
         for key, val in out.items():
             if key in filter_keys:
                 obs_batch[key].append(val)
-    for key, val in obs_batch.items():
-        obs_batch[key] = torch.cat(val, dim=1)  # todo 这里是8个agent zaiyiqi,keyizai model limian jinxing feature agg
+    try:
+        for key, val in obs_batch.items():
+            obs_batch[key] = torch.cat(val, dim=1)  # todo 这里是8个agent zaiyiqi,keyizai model limian jinxing feature agg
+    except Exception as e:
+        print(e)
+        print(key, val)
 
     return obs_batch, agent_ids
 
@@ -563,10 +567,29 @@ def train(flags):  # pylint: disable=too-many-branches, too-many-statements
                 plogger.log(to_log)
                 step += T * B
 
+    def batch_and_learn_test(i):
+        """Thread target for the learning process."""
+        nonlocal step, stats
+        timings = prof.Timings()
+        while step < flags.total_steps:
+            timings.reset()
+            batch, agent_state = get_batch(
+                flags,
+                free_queue,
+                full_queue,
+                buffers,
+                initial_agent_state_buffers,
+                timings,
+            )
+            stats = learn(flags, model, learner_model, batch, agent_state,
+                          optimizer, scheduler)
+            timings.time("learn")
+
         if i == 0:
             logging.info("Batch and learn: %s", timings.summary())
 
     threads = []
+    batch_and_learn_test(0)  # todo remove this line
     for i in range(flags.num_learner_threads):
         thread = threading.Thread(target=batch_and_learn,
                                   name="batch-and-learn-%d" % i,
@@ -689,8 +712,8 @@ def create_env(flags):
 def main(flags):
     if flags.mode == "train":
         train(flags)
-    else:
-        test(flags)
+    # else:
+    #     test(flags)
 
 
 if __name__ == "__main__":
