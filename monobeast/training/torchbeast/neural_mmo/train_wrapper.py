@@ -70,6 +70,7 @@ class FeatureParser:  # 环境obs解析
                 if line[0] != 0:
                     agent_map[0][int(line[2] - init_R),
                                  int(line[3] - init_C)] = line[0]
+                    assert line[0]<=1
 
             obs_num_part = np.zeros((100, 51), dtype="float32")
             index = 0
@@ -157,7 +158,7 @@ class FeatureParser:  # 环境obs解析
                 index += 1
 
             mask = np.array([0 if i < index else 1 for i in range(100)], dtype="bool")
-            entity_loc = np.pad(np.array(entity_loc, dtype=np.int64), ((0, sum(mask)), (0, 0)), constant_values=15)
+            entity_loc = np.pad(np.array(entity_loc, dtype=np.int64), ((0, sum(mask)), (0, 0)), constant_values=0)
             entity_id = np.pad(np.array(entity_id, dtype=np.int64), (0, sum(mask)), constant_values=1000)
             team_in = np.pad(np.array(team_in, dtype=np.int64), (0, sum(mask)), constant_values=16)
             # attack_id = np.pad(np.array(attack_id, dtype='int'), (0, 100-len(attack_id)), constant_values=1000)

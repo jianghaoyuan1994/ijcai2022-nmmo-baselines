@@ -65,6 +65,24 @@ class ResBlock(nn.Module):
         x = self.act(x + residual)
         return x
 
+def fc_block(
+    in_channels,
+    out_channels,
+    activation=None,
+    use_dropout=False,
+    dropout_probability=0.5
+):
+    block = []
+    block.append(nn.Linear(in_channels, out_channels))
+    xavier_normal_(block[-1].weight)
+    if isinstance(activation, torch.nn.Module):
+        block.append(activation)
+    else:
+        raise NotImplementedError
+    if use_dropout:
+        block.append(nn.Dropout(dropout_probability))
+    return sequential_pack(block)
+
 
 class SpatialEncoder(nn.Module):
     def __init__(self, input_dim=56, project_dim=32):
@@ -167,6 +185,42 @@ class EntityEncoder(nn.Module):
         return entity_embeddings, embedded_entity, mask
 
 
+def scatter_connection(project_embeddings, entity_location):
+    # print(project_embeddings.shape)  # T*B 100 48
+    scatter_dim = project_embeddings.shape[-1]
+    B, H, W = project_embeddings.shape[0], 15, 15
+    # print(entity_location.shape)  # T*B 100 2
+    # print(entity_location)
+    device = entity_location.device
+    entity_num = entity_location.shape[1]
+    index = entity_location.view(-1, 2).long()  # T*B*100 2
+    bias = torch.arange(B).unsqueeze(1).repeat(1, entity_num).view(-1).to(device)
+    bias *= H * W
+    # print(bias)
+    # index[:, 0].clamp_(0, W - 1)
+    # index[:, 1].clamp_(0, H - 1)
+    index = index[:, 0] * W + index[:, 1]
+    index += bias
+    # print(index.shape)   #  T*B*100
+    # print(index)
+    index = index.repeat(scatter_dim, 1)
+    # print(index.shape)  # scatter_dim T*B*100
+
+    # flat scatter map and project embeddings
+    scatter_map = torch.zeros(scatter_dim, B * H * W, device=device)
+    project_embeddings = project_embeddings.view(-1, scatter_dim).permute(1, 0)
+    # print(project_embeddings.shape)  # scatter_dim T*B*100
+    # print(project_embeddings[:,:7])
+    # print(index[:,:7])
+    # scatter_map.scatter_(dim=1, index=index, src=project_embeddings)
+    scatter_map.scatter_add_(dim=1, index=index, src=project_embeddings)
+
+    scatter_map = scatter_map.reshape(scatter_dim, B, H, W)
+    scatter_map = scatter_map.permute(1, 0, 2, 3)
+    # print(scatter_map.shape)  # T*B scatter_dim H W
+    return scatter_map
+
+
 class NMMONet(nn.Module):
     def __init__(self, observation_space, num_actions, use_lstm=False):
         super().__init__()
@@ -181,10 +235,14 @@ class NMMONet(nn.Module):
         self.spatialEncoder = SpatialEncoder()
         self.core = nn.Linear(512 + 8 * 15 * 15, 512)
 
+        self.act = nn.ReLU()
         self.unit_nn = nn.Linear(77, 48)
         self.unit_transformer = nn.TransformerEncoder(
             nn.TransformerEncoderLayer(d_model=48, nhead=4, dim_feedforward=96, batch_first=True),
             num_layers=3)
+        self.entity_fc = fc_block(48, 48, activation=self.act)
+        self.embed_fc = fc_block(48, 64, activation=self.act)
+
 
         self.policy_move = nn.Linear(512, 5)
         self.policy_attack_type = nn.Linear(512, 4)
@@ -200,11 +258,13 @@ class NMMONet(nn.Module):
         # [T, B, ...]
         # print(input_dict.keys())
         agent_map, entity_id, entity_in, rangeable, team_in, va_move, \
-        obs_emb, meleeable, mask, magicable, local_map = \
+        obs_emb, meleeable, mask, magicable, local_map, entity_loc = \
             input_dict["agent_map"], input_dict["entity_id"], input_dict["entity_in"], \
             input_dict["rangeable"], input_dict["team_in"], input_dict["va_move"], \
             input_dict["obs_emb"], input_dict["meleeable"], input_dict["mask"], \
-            input_dict["magicable"], input_dict["local_map"]
+            input_dict["magicable"], input_dict["local_map"], input_dict["entity_loc"]
+
+
 
         local_map = F.one_hot(local_map, num_classes=6).permute(0, 1, 4, 2, 3)  # T B C H W
         local_map = torch.flatten(local_map, 0, 1)
@@ -216,26 +276,34 @@ class NMMONet(nn.Module):
         obs_emb = obs_emb.flatten(0, 1)  # T*B 100 51
         entity_emb = torch.cat([obs_emb, entity_in, team_in], dim=2)   # T*B 100 77
         # print(entity_emb.shape)
-        print(entity_emb[0, -5:, :])
+        # print(entity_emb[0, -5:, :])
         mask = mask.flatten(0, 1)
         entity_emb = self.unit_nn(entity_emb)
-        print(entity_emb.shape)
+        # print(entity_emb.shape)
         entity_emb = self.unit_transformer(entity_emb, src_key_padding_mask=mask)
-        print(entity_emb.shape)
-        print(entity_emb[0, -5:, :])
 
-        T, B, *_ = x1.shape
-        x1 = torch.flatten(x1, 0, 1)
+        entity_embeddings = self.entity_fc(self.act(entity_emb))
 
-        mask = torch.flatten(mask, 0, 1)
+        # print(torch.sum(~mask, dim=-1))
+        # print(mask.shape, entity_emb.shape)
+        entity_emb_mask = entity_emb * (~mask.unsqueeze(dim=2))
+        scatter_map = scatter_connection(entity_emb_mask, entity_loc.flatten(0, 1))
+        # print(entity_emb_mask[0, -5:, :])  # 全0
+        # print(entity_emb_mask.sum(dim=1).shape, torch.sum(~mask, dim=-1).unsqueeze(dim=-1).shape)   # 8,48  8,1
+        embedded_entity = entity_emb_mask.sum(dim=1) / torch.sum(~mask, dim=-1).unsqueeze(dim=-1)
+        # print(embedded_entity.shape)   # 8，48
+        embedded_entity = self.embed_fc(embedded_entity)
+        mix_embeded_
 
-        print(x1.shape, mask.shape)
-        x1 = torch.masked_select(x1, mask)
-        print(x1.shape)
-        x1 = torch.mean(x1, dim=1)
-        print(x1.shape)
-        x2 = torch.flatten(x2, 0, 1)
-        x2 = self.cnn(x2)
+        embedded_spatial = self.spatialEncoder(map_emb, scatter_map)
+
+
+
+
+        # print(entity_emb.shape)
+        # print(entity_emb[0, -5:, :])
+
+
         x2 = torch.flatten(x2, start_dim=1)
         x = torch.cat([x1, x2], dim=-1)
         x = F.relu(self.core(x))
