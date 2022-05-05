@@ -25,9 +25,10 @@ class FeatureParser:  # 环境obs解析
         # "attack_id": spaces.Box(low=0, high=1000, shape=(100,), dtype=np.int64),
         "entity_in": spaces.Box(low=0, high=1000, shape=(100,), dtype=np.int64),
         "va_move": spaces.Box(low=0, high=1000, shape=(5,), dtype=np.int64),
-        "meleeable": spaces.Box(low=0, high=1000, shape=(100,), dtype=np.int64),
-        "rangeable": spaces.Box(low=0, high=1000, shape=(100,), dtype=np.int64),
-        "magicable": spaces.Box(low=0, high=1000, shape=(100,), dtype=np.int64)
+        "meleeable": spaces.Box(low=0, high=1, shape=(100,), dtype=np.int64),  # 1
+        "rangeable": spaces.Box(low=0, high=1, shape=(100,), dtype=np.int64),  # 2
+        "magicable": spaces.Box(low=0, high=1, shape=(100,), dtype=np.int64) , # 3   not attack 0
+        "is_attack": spaces.Box(low=0, high=1, shape=(100, 4), dtype=np.int64)
     }
 
     def __init__(self, feas_dim):
@@ -114,28 +115,34 @@ class FeatureParser:  # 环境obs解析
 
                 # 攻击距离
                 if team_in_ == 0:
-                    is_attack = np.zeros(3)
+                    is_attack = np.array([1, 0, 0, 0])
+                    magicable.append(0)
+                    rangeable.append(0)
+                    meleeable.append(0)
                 else:
                     min_d = min(abs(r_in-agent_locR), abs(c_in-agent_locC))
                     if min_d <= 4:
                         magic_attack = 1
-                        magicable.append(int(value[1]))
+                        magicable.append(1)
                     else:
                         magic_attack = 0
+                        magicable.append(0)
 
                     if min_d <= 3:
                         range_attack = 1
-                        rangeable.append(int(value[1]))
+                        rangeable.append(1)
                     else:
                         range_attack = 0
+                        rangeable.append(0)
 
                     if min_d <= 1:
                         melee_attack = 1
-                        meleeable.append(int(value[1]))
+                        meleeable.append(1)
                     else:
                         melee_attack = 0
+                        meleeable.append(0)
 
-                    is_attack = np.array([melee_attack, range_attack, magic_attack])
+                    is_attack = np.array([1, melee_attack, range_attack, magic_attack])
 
                 dr_in = (r_in-agent_locR)
                 dc_in = (c_in-agent_locC)
@@ -153,7 +160,7 @@ class FeatureParser:  # 环境obs解析
                 freezed_in = value[12]   # todo 加入目前freezed了多久
                 obs_num_part[index, :] = np.hstack([level_in, r_in, c_in, dr_in, dc_in, is_mine,
                                                     alive_in, food_in, water_in, health_in, food_re, water_re,
-                                                    health_re, is_attack, freezed_in, attack_team, attack_id])
+                                                    health_re, is_attack, freezed_in, attack_team, attack_id[1:]])
 
                 index += 1
 
@@ -163,9 +170,10 @@ class FeatureParser:  # 环境obs解析
             team_in = np.pad(np.array(team_in, dtype=np.int64), (0, sum(mask)), constant_values=16)
             # attack_id = np.pad(np.array(attack_id, dtype='int'), (0, 100-len(attack_id)), constant_values=1000)
             entity_in = np.pad(np.array(entity_in, dtype=np.int64), (0, sum(mask)), constant_values=8)
-            meleeable = np.pad(np.array(meleeable, dtype=np.int64), (0, 100-len(meleeable)), constant_values=1000)
-            rangeable = np.pad(np.array(rangeable, dtype=np.int64), (0, 100-len(rangeable)), constant_values=1000)
-            magicable = np.pad(np.array(magicable, dtype=np.int64), (0, 100-len(magicable)), constant_values=1000)
+            meleeable = np.pad(np.array(meleeable, dtype=np.bool), (0, sum(mask)), constant_values=0)
+            rangeable = np.pad(np.array(rangeable, dtype=np.bool), (0, sum(mask)), constant_values=0)
+            magicable = np.pad(np.array(magicable, dtype=np.bool), (0, sum(mask)), constant_values=0)
+            # is_attack = np.pad(np.array(is_attack, dtype=np.bool), ((0, sum(mask)), (0, 0)), constant_values=0)
 
             # map_frame = np.concatenate([local_map, agent_map])
 
@@ -187,7 +195,8 @@ class FeatureParser:  # 环境obs解析
                 "va_move": va_move,      # 不用动
                 "meleeable": meleeable,  # 不用动 mask用
                 "rangeable": rangeable,  # 不用动 mask用
-                "magicable": magicable   # 不用动 mask用
+                "magicable": magicable,   # 不用动 mask用
+                "is_attack": is_attack
             }
 
         return frame_list

@@ -193,7 +193,6 @@ def batch(env_output: Dict, filter_keys: List[str]):
 
     return obs_batch, agent_ids
 
-
 def unbatch(agent_output: Dict, agent_ids):
     """Transform agent_ouput to agent-wise format."""
     unbatched_agent_output = {key: {} for key in agent_ids}
@@ -395,7 +394,6 @@ def learn(
         actor_model.load_state_dict(model.state_dict())
         return stats
 
-
 def create_buffers(flags, observation_space, num_actions) -> Buffers:
     T = flags.unroll_length
     # observation_space is a dict
@@ -497,8 +495,9 @@ def train(flags):  # pylint: disable=too-many-branches, too-many-statements
     initial_agent_state_buffers = []
     for _ in range(flags.num_buffers):
         state = model.initial_state(batch_size=1)
-        for t in state:
-            t.share_memory_()
+        for t1, t2 in state:
+            t1.share_memory_()
+            t2.share_memory_()
         initial_agent_state_buffers.append(state)
 
     ctx = mp.get_context("fork")
