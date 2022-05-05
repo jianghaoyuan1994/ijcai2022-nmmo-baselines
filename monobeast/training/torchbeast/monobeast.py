@@ -407,10 +407,14 @@ def create_buffers(flags, observation_space, num_actions) -> Buffers:
         done=dict(size=(T + 1,), dtype=torch.bool),
         episode_return=dict(size=(T + 1,), dtype=torch.float32),
         episode_step=dict(size=(T + 1,), dtype=torch.int32),
-        policy_logits=dict(size=(T + 1, num_actions), dtype=torch.float32),
+        dist_move=dict(size=(T + 1, 5), dtype=torch.float32),
+        dis_type=dict(size=(T + 1, 4), dtype=torch.float32),
+        dis_unit=dict(size=(T + 1, 100), dtype=torch.float32),
         baseline=dict(size=(T + 1,), dtype=torch.float32),
         last_action=dict(size=(T + 1,), dtype=torch.int64),
-        action=dict(size=(T + 1,), dtype=torch.int64),
+        action_move=dict(size=(T + 1,), dtype=torch.int64),
+        action_type=dict(size=(T + 1,), dtype=torch.int64),
+        action_unit_id=dict(size=(T + 1,), dtype=torch.int64)
     )
     specs.update(obs_specs)
     buffers: Buffers = {key: [] for key in specs}

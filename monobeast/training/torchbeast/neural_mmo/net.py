@@ -320,7 +320,8 @@ class AttackHead(nn.Module):
         self.query_fc2 = fc_block(32, 32, activation=None, norm_type=None)
         self.key_dim = 32
 
-    def forward(self, lstm_output, rangeable, meleeable, magicable, entity_embeddings, entity_id, is_attack):
+    def forward(self, lstm_output, rangeable, meleeable, magicable,
+                entity_embeddings, entity_id, is_attack, entity_mask):
         # select attack type
         x = self.project(lstm_output)
         x = self.res(x)
@@ -329,6 +330,7 @@ class AttackHead(nn.Module):
         meleeable = meleeable.flatten(0, 1)
         magicable = magicable.flatten(0, 1)
         is_attack = is_attack.flatten(0, 1)
+        entity_id = entity_id.flatten(0, 1)
         entity_embeddings_type = self.entity_fc(entity_embeddings)
         rangeable_embedding = self.max_pooling(
             (entity_embeddings_type * rangeable.unsqueeze(dim=2)).permute(0, 2, 1)
@@ -344,11 +346,13 @@ class AttackHead(nn.Module):
              meleeable_embedding, rangeable_embedding, magicable_embedding],
             dim=1)
         #print(x.shape, attackable_embedding.shape)  # 8 128   8 4 128
-        logits = (x.unsqueeze(1) * attackable_embedding).sum(dim=2)
-        logits.masked_fill_(~is_attack.bool(), value=-1e9)
-        dis = torch.distributions.categorical.Categorical(logits=logits)
-        action_type = dis.sample()
-        print(action_type)
+        logits_type = (x.unsqueeze(1) * attackable_embedding).sum(dim=2)
+        logits_type.masked_fill_(~is_attack.bool(), value=-1e9)
+        dis_type = torch.distributions.categorical.Categorical(logits=logits_type)
+        action_type = dis_type.sample()
+        # print(action_type)
+
+        # SELECT unit
         self.attack_type_index = torch.cat([torch.ones(T*B, N).unsqueeze(1),
                                             meleeable.unsqueeze(1), rangeable.unsqueeze(1),
                                             magicable.unsqueeze(1)],
@@ -356,11 +360,19 @@ class AttackHead(nn.Module):
         key = self.key_fc(
             entity_embeddings * self.attack_type_index[range(0, T*B), action_type, :].unsqueeze(dim=2))
         query = self.query_fc2(self.query_fc1(lstm_output))
-        logits = query.unsqueeze(1) * key
-        logits = logits.sum(dim=2)
-        logits.masked_fill_(~self.attack_type_index[range(0, T*B), action_type, :].bool(), value=-1e9)
+        logits_unit = query.unsqueeze(1) * key
+        logits_unit = logits_unit.sum(dim=2)
+        logits_unit.masked_fill_(~self.attack_type_index[range(0, T*B), action_type, :].bool(), value=-1e9)
+        logits_unit.masked_fill_(entity_mask, value=-1e9)
+        dis_unit = torch.distributions.categorical.Categorical(logits=logits_unit)
+        action_unit = dis_unit.sample()
+        # print(entity_id)
+        # print(action_unit)
+        # print(logits_unit)
+        action_unit_id = entity_id[range(T*B), action_unit]
+        # print(action_unit_id)
 
-        return dis, action_type
+        return dis_type.logits, dis_unit.logits, action_type, action_unit_id
 
 
 class Policy(nn.Module):
@@ -377,16 +389,17 @@ class Policy(nn.Module):
         logit_move = self.move_head(lstm_output)
         if move_mask is not None:
             move_mask = torch.flatten(move_mask, 0, 1)
-        dist = MaskedPolicy(logit_move, valid_actions=move_mask)
-        move_action = dist.sample()
-        move_action = move_action.view(T, B)
+        dist_move = MaskedPolicy(logit_move, valid_actions=move_mask)
+        action_move = dist_move.sample()
+        action_move = action_move.view(T, B)
 
-        # select attack type
-        logit_action_type, action_action_type = \
+        # select attack type and target id
+        dis_type, dis_unit, action_type, action_unit_id = \
             self.attack_type_unit_id_head(
-                lstm_output, rangeable, meleeable, magicable, entity_embeddings, entity_id, is_attack)
+                lstm_output, rangeable, meleeable, magicable,
+                entity_embeddings, entity_id, is_attack, entity_mask)
 
-        return action_action_type, logit_action_type
+        return dist_move.logits, dis_type, dis_unit, action_move, action_type, action_unit_id
 
 
 class NMMONet(nn.Module):
@@ -428,8 +441,8 @@ class NMMONet(nn.Module):
         self.attack_emb = nn.Embedding(512, 4)
 
     def initial_state(self, batch_size=1):
-        return ((torch.zeros(batch_size, 256), torch.zeros(batch_size, 256)),
-                (torch.zeros(batch_size, 256), torch.zeros(batch_size, 256)))
+        return [[torch.zeros(batch_size, 256), torch.zeros(batch_size, 256)],
+                [torch.zeros(batch_size, 256), torch.zeros(batch_size, 256)]]
 
     def forward(self, input_dict, state=()):
         # [T, B, ...]
@@ -486,14 +499,26 @@ class NMMONet(nn.Module):
         lstm_output, out_state = self.core_lstm(lstm_input.unsqueeze(dim=0), state)
         baseline = self.baseline(lstm_input)
 
-        action, policy_logits = self.policy(lstm_input, entity_embeddings_mask, entity_id,
-                                     rangeable, meleeable, magicable, mask, va_move, is_attack)
+        dist_move, dis_type, dis_unit, action_move, action_type, action_unit_id = \
+            self.policy(lstm_input, entity_embeddings_mask, entity_id,
+                        rangeable, meleeable, magicable, mask, va_move, is_attack)
 
+        dist_move = dist_move.view(T, B, -1)
+        dis_type = dis_type.view(T, B, -1)
+        dis_unit = dis_unit.view(T, B, -1)
+        action_move = action_move.view(T, B)
+        action_type = action_type.view(T, B)
+        action_unit_id = action_unit_id.view(T, B)
         # action = torch.multinomial(F.softmax(policy_logits, dim=1),
         #                            num_samples=1)
         # policy_logits = policy_logits.view(T, B, -1)
-        # baseline = baseline.view(T, B)
+        baseline = baseline.view(T, B)
         # action = action.view(T, B)
-        return (dict(policy_logits=policy_logits,
-                     baseline=baseline,
-                     action=action), out_state)
+        return (dict(dist_move=dist_move,
+                     dis_type=dis_type,
+                     dis_unit=dis_unit,
+                     action_move=action_move,
+                     action_type=action_type,
+                     action_unit_id=action_unit_id,
+                     baseline=baseline
+                     ), out_state)

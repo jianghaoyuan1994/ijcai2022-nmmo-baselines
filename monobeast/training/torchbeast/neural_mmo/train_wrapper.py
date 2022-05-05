@@ -15,16 +15,16 @@ class FeatureParser:  # 环境obs解析
     n_attack_actions = 4
     feature_spec = {
 
-        "obs_emb": spaces.Box(low=-100, high=1000, shape=(100, 17), dtype=np.float32),
+        "obs_emb": spaces.Box(low=-100, high=1000, shape=(100, 51), dtype=np.float32),
         "local_map": spaces.Box(low=-100, high=1000, shape=(15, 15), dtype=np.int64),
         "agent_map": spaces.Box(low=-100, high=1000, shape=(1, 15, 15), dtype=np.float32),
         "mask": spaces.Box(low=0, high=1, shape=(100,), dtype=np.int64),
-        "entity_loc": spaces.Box(low=-200, high=1000, shape=(100, 2), dtype=np.int64),
-        "entity_id": spaces.Box(low=0, high=100, shape=(100,), dtype=np.int64),
-        "team_in": spaces.Box(low=0, high=1000, shape=(100,), dtype=np.int64),
+        "entity_loc": spaces.Box(low=0, high=14, shape=(100, 2), dtype=np.int64),
+        "entity_id": spaces.Box(low=0, high=128, shape=(100,), dtype=np.int64),
+        "team_in": spaces.Box(low=0, high=16, shape=(100,), dtype=np.int64),
         # "attack_id": spaces.Box(low=0, high=1000, shape=(100,), dtype=np.int64),
-        "entity_in": spaces.Box(low=0, high=1000, shape=(100,), dtype=np.int64),
-        "va_move": spaces.Box(low=0, high=1000, shape=(5,), dtype=np.int64),
+        "entity_in": spaces.Box(low=0, high=8, shape=(100,), dtype=np.int64),
+        "va_move": spaces.Box(low=0, high=1, shape=(5,), dtype=np.int64),
         "meleeable": spaces.Box(low=0, high=1, shape=(100,), dtype=np.int64),  # 1
         "rangeable": spaces.Box(low=0, high=1, shape=(100,), dtype=np.int64),  # 2
         "magicable": spaces.Box(low=0, high=1, shape=(100,), dtype=np.int64) , # 3   not attack 0
@@ -166,7 +166,7 @@ class FeatureParser:  # 环境obs解析
 
             mask = np.array([0 if i < index else 1 for i in range(100)], dtype="bool")
             entity_loc = np.pad(np.array(entity_loc, dtype=np.int64), ((0, sum(mask)), (0, 0)), constant_values=0)
-            entity_id = np.pad(np.array(entity_id, dtype=np.int64), (0, sum(mask)), constant_values=1000)
+            entity_id = np.pad(np.array(entity_id, dtype=np.int64), (0, sum(mask)), constant_values=128)
             team_in = np.pad(np.array(team_in, dtype=np.int64), (0, sum(mask)), constant_values=16)
             # attack_id = np.pad(np.array(attack_id, dtype='int'), (0, 100-len(attack_id)), constant_values=1000)
             entity_in = np.pad(np.array(entity_in, dtype=np.int64), (0, sum(mask)), constant_values=8)
