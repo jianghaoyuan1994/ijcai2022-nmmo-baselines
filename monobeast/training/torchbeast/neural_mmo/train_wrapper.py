@@ -265,8 +265,7 @@ class TrainWrapper(Wrapper):
         decisions = self.get_scripted_team_decision(self._prev_raw_obs)  # todo  联盟学习and self-play
         decisions[self.TT_ID] = self.transform_action(
             actions,
-            observations=self._prev_raw_obs[self.TT_ID],
-            auxiliary_script=self.auxiliary_script)
+            observations=self._prev_raw_obs[self.TT_ID])
 
         raw_obs, _, raw_done, raw_info = super().step(decisions)
         if self.TT_ID in raw_obs:
@@ -337,27 +336,37 @@ class TrainWrapper(Wrapper):
 
         # move decisions
         for agent_id, val in actions.items():
+            move = val['action_move']
+            type = val['action_type']
+            target = val['action_unit_id']
             if observations is not None and agent_id not in observations:
                 continue
-            if val == 0:
+            if move == 0:
                 decisions[agent_id] = {}
-            elif 1 <= val <= 4:
+            elif 1 <= move <= 4:
                 decisions[agent_id] = {
                     nmmo.action.Move: {
-                        nmmo.action.Direction: val - 1
+                        nmmo.action.Direction: move - 1
                     }
                 }
             else:
-                raise ValueError(f"invalid action: {val}")
+                raise ValueError(f"invalid action: {move}")
 
-        # attack decisions
-        if auxiliary_script is not None:
-            assert observations is not None
-            attack_decisions = auxiliary_script.act(observations)
-            # merge decisions
-            for agent_id, d in decisions.items():
-                d.update(attack_decisions[agent_id])
-                decisions[agent_id] = d
+            if 1 <= type <= 3:
+                decisions[agent_id] = {
+                    nmmo.action.Attack: {
+                        nmmo.action.Style: type - 1,
+                        nmmo.action.Target: target
+                    }
+                }
+        # # attack decisions
+        # if auxiliary_script is not None:
+        #     assert observations is not None
+        #     attack_decisions = auxiliary_script.act(observations)
+        #     # merge decisions
+        #     for agent_id, d in decisions.items():
+        #         d.update(attack_decisions[agent_id])
+        #         decisions[agent_id] = d
         return decisions
 
 

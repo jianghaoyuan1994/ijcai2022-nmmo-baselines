@@ -165,13 +165,19 @@ def store(env_output, agent_output, agent_state, buffers: Buffers,
     """Store tensor in buffer."""
     for agent_id in env_output.keys():
         index = next(indices_iter)
+        # print(free_indices)
 
         for key, val in env_output[agent_id].items():
+            print(key, val)
             buffers[key][index][t, ...] = val
         for key, val in agent_output[agent_id].items():
             buffers[key][index][t, ...] = val
         for i, tensor in enumerate(agent_state):
-            initial_agent_state_buffers[index][i][...] = tensor
+            for j, ten in enumerate(tensor):
+            # print(initial_agent_state_buffers[index][i])
+            # print(tensor)
+            # print(len(agent_state))
+                initial_agent_state_buffers[index][i][j][...] = ten
 
 
 def batch(env_output: Dict, filter_keys: List[str]):
@@ -192,6 +198,7 @@ def batch(env_output: Dict, filter_keys: List[str]):
         print(key, val)
 
     return obs_batch, agent_ids
+
 
 def unbatch(agent_output: Dict, agent_ids):
     """Transform agent_ouput to agent-wise format."""
@@ -252,7 +259,10 @@ def act(
                     agent_output = unbatch(agent_output_batch, agent_ids)
                     # extract actions
                     actions = {
-                        agent_id: agent_output[agent_id]["action"].item()
+                        agent_id:
+                            {"action_move": agent_output[agent_id]["action_move"].item(),
+                             "action_type": agent_output[agent_id]["action_type"].item(),
+                             "action_unit_id": agent_output[agent_id]["action_unit_id"].item()}
                         for agent_id in agent_output
                     }
 
@@ -262,7 +272,7 @@ def act(
 
                 timings.time("step")
 
-                store(env_output, agent_output, (), buffers,
+                store(env_output, agent_output, agent_state, buffers,
                       initial_agent_state_buffers, free_indices, t + 1)
 
                 timings.time("write")
@@ -394,6 +404,7 @@ def learn(
         actor_model.load_state_dict(model.state_dict())
         return stats
 
+
 def create_buffers(flags, observation_space, num_actions) -> Buffers:
     T = flags.unroll_length
     # observation_space is a dict
@@ -497,6 +508,7 @@ def train(flags):  # pylint: disable=too-many-branches, too-many-statements
 
     # Add initial RNN state.
     initial_agent_state_buffers = []
+    print(flags.num_buffers)
     for _ in range(flags.num_buffers):
         state = model.initial_state(batch_size=1)
         for t1, t2 in state:
