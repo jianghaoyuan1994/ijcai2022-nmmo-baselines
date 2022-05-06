@@ -28,7 +28,7 @@ class FeatureParser:  # 环境obs解析
         "meleeable": spaces.Box(low=0, high=1, shape=(100,), dtype=np.int64),  # 1
         "rangeable": spaces.Box(low=0, high=1, shape=(100,), dtype=np.int64),  # 2
         "magicable": spaces.Box(low=0, high=1, shape=(100,), dtype=np.int64) , # 3   not attack 0
-        "is_attack": spaces.Box(low=0, high=1, shape=(100, 4), dtype=np.int64)
+        "is_attack": spaces.Box(low=0, high=1, shape=(4,), dtype=np.int64)
     }
 
     def __init__(self, feas_dim):
@@ -83,13 +83,14 @@ class FeatureParser:  # 环境obs解析
             magicable = []
             rangeable = []
             meleeable = []
+            all_is_attack = np.array([1,0,0,0])
             while index < 100:
                 is_mine = 1 if index ==0 else 0
                 value = obs_agents[index]
                 if value[0] == 0:
                     break
 
-                entity_id.append(value[1])
+                entity_id.append(index)
 
                 entity_in_ = 8 if value[1] < 0 else (value[1] -1) // 16   #与time
                 entity_in.append(entity_in_)
@@ -114,6 +115,7 @@ class FeatureParser:  # 环境obs解析
                 entity_loc.append([loc_c, loc_r])
 
                 # 攻击距离
+
                 if team_in_ == 0:
                     is_attack = np.array([1, 0, 0, 0])
                     magicable.append(0)
@@ -124,6 +126,7 @@ class FeatureParser:  # 环境obs解析
                     if min_d <= 4:
                         magic_attack = 1
                         magicable.append(1)
+                        all_is_attack[3] = 1
                     else:
                         magic_attack = 0
                         magicable.append(0)
@@ -131,6 +134,7 @@ class FeatureParser:  # 环境obs解析
                     if min_d <= 3:
                         range_attack = 1
                         rangeable.append(1)
+                        all_is_attack[2] = 1
                     else:
                         range_attack = 0
                         rangeable.append(0)
@@ -138,6 +142,7 @@ class FeatureParser:  # 环境obs解析
                     if min_d <= 1:
                         melee_attack = 1
                         meleeable.append(1)
+                        all_is_attack[1] = 1
                     else:
                         melee_attack = 0
                         meleeable.append(0)
@@ -196,7 +201,7 @@ class FeatureParser:  # 环境obs解析
                 "meleeable": meleeable,  # 不用动 mask用
                 "rangeable": rangeable,  # 不用动 mask用
                 "magicable": magicable,   # 不用动 mask用
-                "is_attack": is_attack
+                "is_attack": all_is_attack
             }
 
         return frame_list
@@ -252,7 +257,7 @@ class TrainWrapper(Wrapper):
         obs = raw_obs[self.TT_ID]
         obs = self.feature_parser.parse(obs)
 
-        self.reset_auxiliary_script(self.config)
+        # self.reset_auxiliary_script(self.config)
         self.reset_scripted_team(self.config)
         self.agents = list(obs.keys())
         self._prev_achv = self.metrices_by_team()[self.TT_ID]
@@ -293,14 +298,14 @@ class TrainWrapper(Wrapper):
             done = {key: True for key in done.keys()}
         return obs, reward, done, info
 
-    def reset_auxiliary_script(self, config):
-        if not self.use_auxiliary_script:
-            self.auxiliary_script = None
-            return
-        if getattr(self, "auxiliary_script", None) is not None:
-            self.auxiliary_script.reset()
-            return
-        self.auxiliary_script = AttackTeam("auxiliary", config)
+    # def reset_auxiliary_script(self, config):
+    #     if not self.use_auxiliary_script:
+    #         self.auxiliary_script = None
+    #         return
+    #     if getattr(self, "auxiliary_script", None) is not None:
+    #         self.auxiliary_script.reset()
+    #         return
+    #     self.auxiliary_script = AttackTeam("auxiliary", config)
 
 
     def reset_scripted_team(self, config):
@@ -330,7 +335,7 @@ class TrainWrapper(Wrapper):
         return decisions
 
     @staticmethod
-    def transform_action(actions, observations=None, auxiliary_script=None):
+    def  transform_action(actions, observations=None, auxiliary_script=None):
         """neural network move + scripted attack"""
         decisions = {}
 

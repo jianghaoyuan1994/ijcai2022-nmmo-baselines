@@ -168,7 +168,7 @@ def store(env_output, agent_output, agent_state, buffers: Buffers,
         # print(free_indices)
 
         for key, val in env_output[agent_id].items():
-            print(key, val)
+            # print(key, val)
             buffers[key][index][t, ...] = val
         for key, val in agent_output[agent_id].items():
             buffers[key][index][t, ...] = val
@@ -228,7 +228,7 @@ def act(
         gym_env.seed(seed)
         env = Environment(gym_env)
         env_output = env.initial()
-        agent_state = model.initial_state(batch_size=1)
+        agent_state = model.initial_state(batch_size=8)
         env_output_batch, agent_ids = batch(
             env_output, filter_keys=gym_env.observation_space.keys())
         agent_output_batch, unused_state = model(env_output_batch, agent_state)
@@ -272,7 +272,7 @@ def act(
 
                 timings.time("step")
 
-                store(env_output, agent_output, agent_state, buffers,
+                store(env_output, agent_output, (), buffers,
                       initial_agent_state_buffers, free_indices, t + 1)
 
                 timings.time("write")
@@ -422,7 +422,9 @@ def create_buffers(flags, observation_space, num_actions) -> Buffers:
         dis_type=dict(size=(T + 1, 4), dtype=torch.float32),
         dis_unit=dict(size=(T + 1, 100), dtype=torch.float32),
         baseline=dict(size=(T + 1,), dtype=torch.float32),
-        last_action=dict(size=(T + 1,), dtype=torch.int64),
+        last_action_move=dict(size=(T + 1,), dtype=torch.int64),
+        last_action_type=dict(size=(T + 1,), dtype=torch.int64),
+        last_action_unit=dict(size=(T + 1,), dtype=torch.int64),
         action_move=dict(size=(T + 1,), dtype=torch.int64),
         action_type=dict(size=(T + 1,), dtype=torch.int64),
         action_unit_id=dict(size=(T + 1,), dtype=torch.int64)
