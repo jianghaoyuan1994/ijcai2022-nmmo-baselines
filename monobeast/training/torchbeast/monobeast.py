@@ -512,7 +512,7 @@ def train(flags):  # pylint: disable=too-many-branches, too-many-statements
     initial_agent_state_buffers = []
     print(flags.num_buffers)
     for _ in range(flags.num_buffers):
-        state = model.initial_state(batch_size=1)
+        state = model.initial_state(batch_size=8)
         for t1, t2 in state:
             t1.share_memory_()
             t2.share_memory_()

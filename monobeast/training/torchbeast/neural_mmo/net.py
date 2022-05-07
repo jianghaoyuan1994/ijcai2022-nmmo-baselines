@@ -342,7 +342,7 @@ class AttackHead(nn.Module):
             (entity_embeddings_type * magicable.unsqueeze(dim=2)).permute(0, 2, 1)
         ).permute(0, 2, 1)
         attackable_embedding = torch.cat(
-            [self.not_attack.unsqueeze(0).repeat(8, 1, 1),
+            [self.not_attack.unsqueeze(0).repeat(T*B, 1, 1),
              meleeable_embedding, rangeable_embedding, magicable_embedding],
             dim=1)
         #print(x.shape, attackable_embedding.shape)  # 8 128   8 4 128
@@ -456,6 +456,7 @@ class NMMONet(nn.Module):
             input_dict["is_attack"]
 
         T, B, H, W = local_map.shape
+        assert B==8
         local_map = F.one_hot(local_map, num_classes=6).permute(0, 1, 4, 2, 3)  # T B C H W
         local_map = torch.flatten(local_map, 0, 1)
         map_emb = torch.cat([agent_map.flatten(0, 1), local_map], dim=1)  # T*B C 15 15
@@ -490,17 +491,17 @@ class NMMONet(nn.Module):
         embedded_spatial = self.spatialEncoder(map_emb, scatter_map)
         # print(embedded_entity.shape, embedded_spatial.shape)  # 8 64  8 256
         lstm_input_before = torch.cat([embedded_entity, embedded_spatial, mine_entity], dim=-1)  # noteblty
-        lstm_input_ = self.mix_fc(lstm_input_before)
+        lstm_input_ = self.mix_fc(lstm_input_before).view(T, B, -1)
         # print(lstm_input_.shape)
-        lstm_input_p1, lstm_input_p2 = lstm_input_[:, :128], lstm_input_[:, 128:]
-        lstm_input_p1 = torch.max(lstm_input_p1, 0)[0].unsqueeze(0).repeat(T*B, 1)
+        lstm_input_p1, lstm_input_p2 = lstm_input_[:, :, :128], lstm_input_[:, :, 128:]
+        lstm_input_p1 = torch.max(lstm_input_p1, 1)[0].unsqueeze(1).repeat(1, B, 1)
         lstm_input = torch.cat([lstm_input_p1, lstm_input_p2], dim=-1)
 
-        lstm_output, out_state = self.core_lstm(lstm_input.unsqueeze(dim=0), state)
+        lstm_output, out_state = self.core_lstm(lstm_input, state)
         baseline = self.baseline(lstm_input)
 
         dist_move, dis_type, dis_unit, action_move, action_type, action_unit_id = \
-            self.policy(lstm_input, entity_embeddings_mask, entity_id,
+            self.policy(lstm_input.flatten(0, 1), entity_embeddings_mask, entity_id,
                         rangeable, meleeable, magicable, mask, va_move, is_attack)
 
         dist_move = dist_move.view(T, B, -1)
