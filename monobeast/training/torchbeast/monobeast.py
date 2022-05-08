@@ -169,15 +169,19 @@ def store(env_output, agent_output, agent_state, buffers: Buffers,
 
         for key, val in env_output[agent_id].items():
             # print(key, val)
+            # print(key, val.shape)
             buffers[key][index][t, ...] = val
         for key, val in agent_output[agent_id].items():
+            # print(key, val.shape)
             buffers[key][index][t, ...] = val
-        for i, tensor in enumerate(agent_state):
-            for j, ten in enumerate(tensor):
-            # print(initial_agent_state_buffers[index][i])
-            # print(tensor)
-            # print(len(agent_state))
-                initial_agent_state_buffers[index][i][j][...] = ten
+
+        if agent_state != ():
+            for layer, val in enumerate(agent_state[agent_id]):
+                # print(initial_agent_state_buffers[index][i])
+                # print(tensor)
+                # print(len(agent_state))
+                initial_agent_state_buffers[index][layer][0][...] = val[0]
+                initial_agent_state_buffers[index][layer][1][...] = val[1]
 
 
 def batch(env_output: Dict, filter_keys: List[str]):
@@ -200,14 +204,19 @@ def batch(env_output: Dict, filter_keys: List[str]):
     return obs_batch, agent_ids
 
 
-def unbatch(agent_output: Dict, agent_ids):
+def unbatch(agent_output: Dict, hidden_state, agent_ids):
     """Transform agent_ouput to agent-wise format."""
     unbatched_agent_output = {key: {} for key in agent_ids}
+    unbatched_agent_hidden_state = {key: [[],[]] for key in agent_ids}
     for key, val in agent_output.items():
         for i, agent_id in enumerate(agent_ids):
             unbatched_agent_output[agent_id][
                 key] = val[:, i]  # val shape: [1, B, ...]
-    return unbatched_agent_output
+
+    for layer, (h, c) in enumerate(hidden_state):
+        for i, agent_id in enumerate(agent_ids):
+            unbatched_agent_hidden_state[agent_id][layer] = [h[i, :], c[i, :]]
+    return unbatched_agent_output, unbatched_agent_hidden_state
 
 
 def act(
@@ -232,15 +241,16 @@ def act(
         env_output_batch, agent_ids = batch(
             env_output, filter_keys=gym_env.observation_space.keys())
         agent_output_batch, unused_state = model(env_output_batch, agent_state)
-        agent_output = unbatch(agent_output_batch, agent_ids)
+        agent_output, hidden = unbatch(agent_output_batch, agent_state, agent_ids)
         while True:
 
             free_indices = [free_queue.get() for _ in range(flags.num_agents)]
+            assert free_indices[-1] - free_indices[0] == 7, "{}".format(free_indices)
             if None in free_indices:
                 break
 
             # Write old rollout end.
-            store(env_output, agent_output, agent_state, buffers,
+            store(env_output, agent_output, hidden, buffers,
                   initial_agent_state_buffers, free_indices, 0)
 
             # Do new rollout.
@@ -256,7 +266,7 @@ def act(
                     agent_output_batch, agent_state = model(
                         env_output_batch, agent_state)
                     # unbatch
-                    agent_output = unbatch(agent_output_batch, agent_ids)
+                    agent_output, hidden = unbatch(agent_output_batch, agent_state, agent_ids)
                     # extract actions
                     actions = {
                         agent_id:
@@ -302,6 +312,7 @@ def get_batch(
     with lock:
         timings.time("lock")
         indices = [full_queue.get() for _ in range(flags.batch_size)]
+        assert (indices[-1] - indices[0]) % 7 == 0, "{}".format(indices)
         timings.time("dequeue")
     batch = {
         key: torch.stack([buffers[key][m] for m in indices], dim=1)
@@ -512,11 +523,15 @@ def train(flags):  # pylint: disable=too-many-branches, too-many-statements
     initial_agent_state_buffers = []
     print(flags.num_buffers)
     for _ in range(flags.num_buffers):
-        state = model.initial_state(batch_size=8)
-        for t1, t2 in state:
+        state = model.initial_state(batch_size=1)
+        state_ = []
+        for h, c in state:
+            state_.append([h.squeeze(0),c.squeeze(0)])
+
+        for layer, (t1, t2) in enumerate(state_):
             t1.share_memory_()
             t2.share_memory_()
-        initial_agent_state_buffers.append(state)
+        initial_agent_state_buffers.append(state_)
 
     ctx = mp.get_context("fork")
     free_queue = ctx.SimpleQueue()

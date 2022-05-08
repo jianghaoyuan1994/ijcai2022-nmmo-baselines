@@ -441,8 +441,7 @@ class NMMONet(nn.Module):
         self.attack_emb = nn.Embedding(512, 4)
 
     def initial_state(self, batch_size=1):
-        return [[torch.zeros(batch_size, 256), torch.zeros(batch_size, 256)],
-                [torch.zeros(batch_size, 256), torch.zeros(batch_size, 256)]]
+        return torch.zeros(2, 2, batch_size, 256)
 
     def forward(self, input_dict, state=()):
         # [T, B, ...]
@@ -456,7 +455,7 @@ class NMMONet(nn.Module):
             input_dict["is_attack"]
 
         T, B, H, W = local_map.shape
-        assert B==8
+        # assert B==8, "{}".format(local_map.shape) # warn : B is batch contain
         local_map = F.one_hot(local_map, num_classes=6).permute(0, 1, 4, 2, 3)  # T B C H W
         local_map = torch.flatten(local_map, 0, 1)
         map_emb = torch.cat([agent_map.flatten(0, 1), local_map], dim=1)  # T*B C 15 15
@@ -491,11 +490,11 @@ class NMMONet(nn.Module):
         embedded_spatial = self.spatialEncoder(map_emb, scatter_map)
         # print(embedded_entity.shape, embedded_spatial.shape)  # 8 64  8 256
         lstm_input_before = torch.cat([embedded_entity, embedded_spatial, mine_entity], dim=-1)  # noteblty
-        lstm_input_ = self.mix_fc(lstm_input_before).view(T, B, -1)
+        lstm_input_ = self.mix_fc(lstm_input_before).view(T, B//8, 8,  512)
         # print(lstm_input_.shape)
-        lstm_input_p1, lstm_input_p2 = lstm_input_[:, :, :128], lstm_input_[:, :, 128:]
-        lstm_input_p1 = torch.max(lstm_input_p1, 1)[0].unsqueeze(1).repeat(1, B, 1)
-        lstm_input = torch.cat([lstm_input_p1, lstm_input_p2], dim=-1)
+        lstm_input_p1, lstm_input_p2 = lstm_input_[:, :, :, :128], lstm_input_[:, :, :, 128:]
+        lstm_input_p1 = torch.max(lstm_input_p1, 2)[0].unsqueeze(2).repeat(1, B//8, 8, 1)
+        lstm_input = torch.cat([lstm_input_p1, lstm_input_p2], dim=-1).view(T, B, 512)
 
         lstm_output, out_state = self.core_lstm(lstm_input, state)
         baseline = self.baseline(lstm_input)
@@ -521,5 +520,5 @@ class NMMONet(nn.Module):
                      action_move=action_move,
                      action_type=action_type,
                      action_unit_id=action_unit_id,
-                     baseline=baseline
-                     ), out_state)
+                     baseline=baseline),
+                out_state)
