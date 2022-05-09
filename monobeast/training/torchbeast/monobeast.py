@@ -600,7 +600,7 @@ def train(flags):  # pylint: disable=too-many-branches, too-many-statements
         for layer, (t1, t2) in enumerate(state_):
             t1.share_memory_()
             t2.share_memory_()
-        initial_agent_state_buffers.append(state_)
+        initial_agent_state_buffers.append(state_)      # flags.num_buffers 2 2 256
 
     ctx = mp.get_context("fork")
     free_queue = ctx.SimpleQueue()
@@ -626,10 +626,18 @@ def train(flags):  # pylint: disable=too-many-branches, too-many-statements
 
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
 
-    # load_model(
-    #     "/home/jianghaoyuan/Desktop/ijcai2022-nmmo-baselines/monobeast/training/4_24_tile_cnn/nmmo/model_4198400.pt",
-    #     model, optimizer, scheduler
-    #     )
+    # checkpoint_dir = Path(flags.savedir).joinpath(flags.xpid)
+    # all_checkpoint = glob.glob(
+    #     checkpoint_dir.joinpath("model_*").resolve().as_posix())
+    # if all_checkpoint:
+    #     checkpointpath = sorted(all_checkpoint, key=os.path.getmtime,
+    #                             reverse=True)[0]
+    #     logging.info(f"Loading checkpoint from path: {checkpointpath}")
+    #     load_model(
+    #         checkpointpath,
+    #         learner_model, optimizer, scheduler
+    #         )
+    #     logging.info(f"Load checkpoint done!")
 
     logger = logging.getLogger("logfile")
     stat_keys = [
@@ -809,7 +817,7 @@ Net = NMMONet
 
 def create_env(flags):
     cfg = CompetitionConfig()
-    cfg.NMAPS = 400  # im: add random map nums
+    cfg.NMAPS = 4000  # im: add random map nums
     if flags.mode == "test_render":
         cfg.RENDER = True
     return TrainWrapper(TeamBasedEnv(config=cfg))

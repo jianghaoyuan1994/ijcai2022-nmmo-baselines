@@ -9,13 +9,11 @@ from ijcai2022nmmo.scripted.scripted_team import ScriptedTeam
 
 class FeatureParser:  # 环境obs解析
     map_size = 15
-    n_move_actions = 5  # 0不动 1上 2下 3左 4右
+    n_move_actions = 5  # 0不动 1上 2下 3右 4左
     NEIGHBOR = [(6, 7), (8, 7), (7, 8), (7, 6)]  # north, south, east, west
     OBSTACLE = (0, 1, 5) # lava, water, stone  # todo shibushi 3he1 embedding
-    n_attack_actions = 4
     feature_spec = {
-
-        "obs_emb": spaces.Box(low=-100, high=1000, shape=(100, 43), dtype=np.float32),
+        "obs_emb": spaces.Box(low=-100, high=1000, shape=(100, 44), dtype=np.float32),
         "local_map": spaces.Box(low=-100, high=1000, shape=(15, 15), dtype=np.int64),
         "agent_map": spaces.Box(low=-100, high=1000, shape=(1, 15, 15), dtype=np.float32),
         "mask": spaces.Box(low=0, high=1, shape=(100,), dtype=np.bool),
@@ -73,7 +71,7 @@ class FeatureParser:  # 环境obs解析
                                  int(line[3] - init_C)] = line[0]
                     assert line[0]<=1
 
-            obs_num_part = np.zeros((100, 43), dtype="float32")
+            obs_num_part = np.zeros((100, 44), dtype="float32")
             index = 0
             entity_loc = []
             entity_id = []
@@ -95,9 +93,12 @@ class FeatureParser:  # 环境obs解析
                 entity_in_ = 8 if value[1] < 0 else (value[1] -1) // 16   #与time
                 entity_in.append(entity_in_)
 
-
-                attack_team = self.onehot_team[16] if value[2] < 0 else self.onehot_team[int((value[2] - 1) // 8)]
-                attack_id = self.onehot_index[8] if value[2] < 0 else self.onehot_index[int((value[2] - 1) % 8)]
+                if value[2] == 0:
+                    attack_team = np.zeros(17)
+                    attack_id = np.zeros(9)
+                else:
+                    attack_team = self.onehot_team[16] if value[2] < 0 else self.onehot_team[int((value[2] - 1) // 8)]  # 0的时候应该全0？
+                    attack_id = self.onehot_index[8] if value[2] < 0 else self.onehot_index[int((value[2] - 1) % 8)]   # 0的时候应该全0？
                 # attack_id.append(attack_id_)
 
                 level_in = value[3] / 10
@@ -122,7 +123,7 @@ class FeatureParser:  # 环境obs解析
                     rangeable.append(0)
                     meleeable.append(0)
                 else:
-                    min_d = min(abs(r_in-agent_locR), abs(c_in-agent_locC))
+                    min_d = max(abs(r_in-agent_locR), abs(c_in-agent_locC))
                     if min_d <= 4:
                         magic_attack = 1
                         magicable.append(1)
@@ -165,7 +166,7 @@ class FeatureParser:  # 环境obs解析
                 freezed_in = value[12]   # todo 加入目前freezed了多久
                 obs_num_part[index, :] = np.hstack([level_in, r_in, c_in, dr_in, dc_in, is_mine,
                                                     alive_in, food_in, water_in, health_in, food_re, water_re,
-                                                    health_re, is_attack, freezed_in, attack_team, attack_id[1:]])
+                                                    health_re, is_attack, freezed_in, attack_team, attack_id])
 
                 index += 1
 
@@ -260,7 +261,7 @@ class TrainWrapper(Wrapper):
         # self.reset_auxiliary_script(self.config)
         self.reset_scripted_team(self.config)
         self.agents = list(obs.keys())
-        self._prev_achv = self.metrices_by_team()[self.TT_ID]
+        self._prev_achv = self.metrices_by_team()[self.TT_ID]  # todo 查看1
         self._prev_raw_obs = raw_obs
         self._step = 0
 

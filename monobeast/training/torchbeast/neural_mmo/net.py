@@ -418,7 +418,7 @@ class NMMONet(nn.Module):
         self.core = nn.Linear(512 + 8 * 15 * 15, 512)
 
         self.act = nn.ReLU()
-        self.unit_nn = nn.Linear(69, 48)
+        self.unit_nn = nn.Linear(70, 48)
         self.unit_transformer = nn.TransformerEncoder(
             nn.TransformerEncoderLayer(d_model=48, nhead=4, dim_feedforward=96, batch_first=True),
             num_layers=3)
