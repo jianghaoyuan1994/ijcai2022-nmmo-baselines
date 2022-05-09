@@ -15,10 +15,10 @@ class FeatureParser:  # 环境obs解析
     n_attack_actions = 4
     feature_spec = {
 
-        "obs_emb": spaces.Box(low=-100, high=1000, shape=(100, 51), dtype=np.float32),
+        "obs_emb": spaces.Box(low=-100, high=1000, shape=(100, 43), dtype=np.float32),
         "local_map": spaces.Box(low=-100, high=1000, shape=(15, 15), dtype=np.int64),
         "agent_map": spaces.Box(low=-100, high=1000, shape=(1, 15, 15), dtype=np.float32),
-        "mask": spaces.Box(low=0, high=1, shape=(100,), dtype=np.int64),
+        "mask": spaces.Box(low=0, high=1, shape=(100,), dtype=np.bool),
         "entity_loc": spaces.Box(low=0, high=14, shape=(100, 2), dtype=np.int64),
         "entity_id": spaces.Box(low=0, high=128, shape=(100,), dtype=np.int64),
         "team_in": spaces.Box(low=0, high=16, shape=(100,), dtype=np.int64),
@@ -73,7 +73,7 @@ class FeatureParser:  # 环境obs解析
                                  int(line[3] - init_C)] = line[0]
                     assert line[0]<=1
 
-            obs_num_part = np.zeros((100, 51), dtype="float32")
+            obs_num_part = np.zeros((100, 43), dtype="float32")
             index = 0
             entity_loc = []
             entity_id = []
@@ -83,7 +83,7 @@ class FeatureParser:  # 环境obs解析
             magicable = []
             rangeable = []
             meleeable = []
-            all_is_attack = np.array([1,0,0,0])
+            all_is_attack = np.array([1, 0, 0, 0])
             while index < 100:
                 is_mine = 1 if index ==0 else 0
                 value = obs_agents[index]
@@ -97,7 +97,7 @@ class FeatureParser:  # 环境obs解析
 
 
                 attack_team = self.onehot_team[16] if value[2] < 0 else self.onehot_team[int((value[2] - 1) // 8)]
-                attack_id = self.onehot_index[8] if value[2] < 0 else self.onehot_team[int((value[2] - 1) % 16)]
+                attack_id = self.onehot_index[8] if value[2] < 0 else self.onehot_index[int((value[2] - 1) % 8)]
                 # attack_id.append(attack_id_)
 
                 level_in = value[3] / 10

@@ -131,27 +131,61 @@ def compute_baseline_loss(advantages, mask=None):
     return torch.sum(loss) / torch.sum(mask)
 
 
-def compute_entropy_loss(logits, mask=None):
+def compute_entropy_loss(dist_move, dis_type, dis_unit, action_type, mask=None):
     """Return the entropy loss, i.e., the negative entropy of the policy."""
     if mask is None:
-        mask = torch.ones_like(logits)
-    else:
-        mask = mask.unsqueeze(dim=-1).expand_as(logits)
-    policy = F.softmax(logits, dim=-1)
-    log_policy = F.log_softmax(logits, dim=-1)
-    loss = policy * log_policy
+        mask = torch.ones_like(dist_move.view(-1))
+    # else:
+    #     mask = mask.unsqueeze(dim=-1).expand_as(dist_move)
+
+    policy_move = F.softmax(dist_move, dim=-1)
+    log_policy_move = F.log_softmax(dist_move, dim=-1)
+    loss_move = policy_move * log_policy_move
+
+    policy_type = F.softmax(dis_type, dim=-1)
+    log_policy_type = F.log_softmax(dis_type, dim=-1)
+    loss_type = policy_type * log_policy_type
+
+    policy_unit = F.softmax(dis_unit, dim=-1)
+    log_policy_unit = F.log_softmax(dis_unit, dim=-1)
+    loss_unit = policy_unit * log_policy_unit
+    loss_unit[action_type == 0] = 0
+
+    loss = loss_move.sum(-1) + loss_type.sum(-1) + loss_unit.sum(-1)
+
     loss *= mask
     return torch.sum(loss) / torch.sum(mask)
 
 
-def compute_policy_gradient_loss(logits, actions, advantages, mask=None):
+def compute_policy_gradient_loss(target_move_logits,
+                                 target_type_logits,
+                                 target_unit_logits,
+                                 actions_move,
+                                 actions_type,
+                                 actions_unit_id,
+                                 advantages, mask=None):
     if mask is None:
         mask = torch.ones_like(advantages)
-    cross_entropy = F.nll_loss(
-        F.log_softmax(torch.flatten(logits, 0, 1), dim=-1),
-        target=torch.flatten(actions, 0, 1),
+
+    cross_entropy_move = F.nll_loss(
+        F.log_softmax(torch.flatten(target_move_logits, 0, 1), dim=-1),
+        target=torch.flatten(actions_move, 0, 1),
         reduction="none",
     )
+    cross_entropy_type = F.nll_loss(
+        F.log_softmax(torch.flatten(target_type_logits, 0, 1), dim=-1),
+        target=torch.flatten(actions_type, 0, 1),
+        reduction="none",
+    )
+    cross_entropy_unit = F.nll_loss(
+        F.log_softmax(torch.flatten(target_unit_logits, 0, 1), dim=-1),
+        target=torch.flatten(actions_unit_id, 0, 1),
+        reduction="none",
+    )
+    cross_entropy_unit[torch.flatten(actions_type, 0, 1) == 0] = 0
+
+    cross_entropy = cross_entropy_move + cross_entropy_type + cross_entropy_unit
+
     cross_entropy = cross_entropy.view_as(advantages)
     loss = cross_entropy * advantages.detach()
     loss *= mask
@@ -312,7 +346,8 @@ def get_batch(
     with lock:
         timings.time("lock")
         indices = [full_queue.get() for _ in range(flags.batch_size)]
-        assert (indices[-1] - indices[0]) % 7 == 0, "{}".format(indices)
+        # assert (indices[-1] - indices[0] + 1) % 8 == 0 and \
+        #        (indices[-1] - indices[0] + 1) == len(indices), "{}".format(indices)
         timings.time("dequeue")
     batch = {
         key: torch.stack([buffers[key][m] for m in indices], dim=1)
@@ -320,8 +355,23 @@ def get_batch(
     }
     initial_agent_state = tuple()
     if flags.use_lstm:
-        initial_agent_state = (torch.cat(ts, dim=1) for ts in zip(
-            *[initial_agent_state_buffers[m] for m in indices]))
+        # initial_agent_state = (torch.cat(ts, dim=1) for ts in zip(
+        #     *[initial_agent_state_buffers[m] for m in indices]))
+        h1, c1, h2, c2 = [], [], [], []
+        for m in indices:
+            for layer, val in enumerate(initial_agent_state_buffers[m]):
+                if layer == 0:
+                    h1.append(val[0])
+                    c1.append(val[1])
+                elif layer == 1:
+                    h2.append(val[0])
+                    c2.append(val[1])
+        h1 = torch.stack(h1).to(device=flags.device, non_blocking=True)
+        c1 = torch.stack(c1).to(device=flags.device, non_blocking=True)
+        h2 = torch.stack(h2).to(device=flags.device, non_blocking=True)
+        c2 = torch.stack(c2).to(device=flags.device, non_blocking=True)
+        initial_agent_state = [[h1, c1], [h2, c2]]
+
     timings.time("batch")
     for m in indices:
         free_queue.put(m)
@@ -330,10 +380,10 @@ def get_batch(
         k: t.to(device=flags.device, non_blocking=True)
         for k, t in batch.items()
     }
-    if flags.use_lstm:
-        initial_agent_state = tuple(
-            t.to(device=flags.device, non_blocking=True)
-            for t in initial_agent_state)
+    # if flags.use_lstm:
+    #     initial_agent_state = tuple(
+    #         t.to(device=flags.device, non_blocking=True)
+    #         for t in initial_agent_state)
     timings.time("device")
     return batch, initial_agent_state
 
@@ -372,9 +422,15 @@ def learn(
         mask = (~batch["done"]).float()  # mask dead agent
 
         vtrace_returns = vtrace.from_logits(
-            behavior_policy_logits=batch["policy_logits"],
-            target_policy_logits=learner_outputs["policy_logits"],
-            actions=batch["action"],
+            behavior_move_logits=batch["dist_move"],
+            behavior_type_logits=batch["dis_type"],
+            behavior_unit_logits=batch["dis_unit"],
+            target_move_logits=learner_outputs["dist_move"],
+            target_type_logits=learner_outputs["dis_type"],
+            target_unit_logits=learner_outputs["dis_unit"],
+            actions_move=batch["action_move"],
+            actions_type=batch["action_type"],
+            actions_unit_id=batch["action_unit_id"],
             discounts=discounts,
             rewards=clipped_rewards,
             values=learner_outputs["baseline"],
@@ -382,20 +438,37 @@ def learn(
         )
 
         pg_loss = compute_policy_gradient_loss(
-            learner_outputs["policy_logits"],
-            batch["action"],
+            learner_outputs["dist_move"],
+            learner_outputs["dis_type"],
+            learner_outputs["dis_unit"],
+            batch["action_move"],
+            batch["action_type"],
+            batch["action_unit_id"],
             vtrace_returns.pg_advantages,
             mask=mask,
         )
         baseline_loss = flags.baseline_cost * compute_baseline_loss(
             vtrace_returns.vs - learner_outputs["baseline"], mask=mask)
         entropy_loss = flags.entropy_cost * compute_entropy_loss(
-            learner_outputs["policy_logits"], mask=mask)
+            learner_outputs["dist_move"],
+            learner_outputs["dis_type"],
+            learner_outputs["dis_unit"],
+            batch["action_type"],
+            mask=mask)
 
         total_loss = pg_loss + baseline_loss + entropy_loss
 
         episode_returns = batch["episode_return"][batch["done"]]
         episode_steps = batch["episode_step"][batch["done"]]
+        optimizer.zero_grad()
+        total_loss.backward()
+        grad_norm = nn.utils.clip_grad_norm_(model.parameters(),
+                                             flags.grad_norm_clipping)
+        optimizer.step()
+        scheduler.step()
+
+        actor_model.load_state_dict(model.state_dict())
+
         stats = {
             # "episode_returns": tuple(episode_returns.cpu().numpy()),
             "mean_episode_return": torch.mean(episode_returns).item(),
@@ -404,15 +477,11 @@ def learn(
             "pg_loss": pg_loss.item(),
             "baseline_loss": baseline_loss.item(),
             "entropy_loss": entropy_loss.item(),
+            "advantage": torch.mean(vtrace_returns.pg_advantages).item(),
+            "rho": torch.exp(vtrace_returns.log_rhos).mean().item(),
+            "grad_norm": grad_norm.item(),
         }
 
-        optimizer.zero_grad()
-        total_loss.backward()
-        nn.utils.clip_grad_norm_(model.parameters(), flags.grad_norm_clipping)
-        optimizer.step()
-        scheduler.step()
-
-        actor_model.load_state_dict(model.state_dict())
         return stats
 
 
@@ -570,6 +639,9 @@ def train(flags):  # pylint: disable=too-many-branches, too-many-statements
         "pg_loss",
         "baseline_loss",
         "entropy_loss",
+        "rho",
+        "advantage",
+        "grad_norm",
     ]
     logger.info("# Step\t%s", "\t".join(stat_keys))
 
@@ -599,29 +671,31 @@ def train(flags):  # pylint: disable=too-many-branches, too-many-statements
                 plogger.log(to_log)
                 step += T * B
 
-    def batch_and_learn_test(i):
-        """Thread target for the learning process."""
-        nonlocal step, stats
-        timings = prof.Timings()
-        while step < flags.total_steps:
-            timings.reset()
-            batch, agent_state = get_batch(
-                flags,
-                free_queue,
-                full_queue,
-                buffers,
-                initial_agent_state_buffers,
-                timings,
-            )
-            stats = learn(flags, model, learner_model, batch, agent_state,
-                          optimizer, scheduler)
-            timings.time("learn")
-
         if i == 0:
             logging.info("Batch and learn: %s", timings.summary())
+    # def batch_and_learn_test(i):
+    #     """Thread target for the learning process."""
+    #     nonlocal step, stats
+    #     timings = prof.Timings()
+    #     while step < flags.total_steps:
+    #         timings.reset()
+    #         batch, agent_state = get_batch(
+    #             flags,
+    #             free_queue,
+    #             full_queue,
+    #             buffers,
+    #             initial_agent_state_buffers,
+    #             timings,
+    #         )
+    #         stats = learn(flags, model, learner_model, batch, agent_state,
+    #                       optimizer, scheduler)
+    #         timings.time("learn")
+    #
+    #     if i == 0:
+    #         logging.info("Batch and learn: %s", timings.summary())
 
     threads = []
-    batch_and_learn_test(0)  # todo remove this line
+    # batch_and_learn_test(0)  # todo remove this line
     for i in range(flags.num_learner_threads):
         thread = threading.Thread(target=batch_and_learn,
                                   name="batch-and-learn-%d" % i,

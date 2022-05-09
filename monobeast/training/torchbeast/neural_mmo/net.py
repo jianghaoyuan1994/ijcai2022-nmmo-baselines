@@ -353,7 +353,8 @@ class AttackHead(nn.Module):
         # print(action_type)
 
         # SELECT unit
-        self.attack_type_index = torch.cat([torch.ones(T*B, N).unsqueeze(1),
+        device = meleeable.device
+        self.attack_type_index = torch.cat([torch.ones(T*B, N).to(device=device).unsqueeze(1),
                                             meleeable.unsqueeze(1), rangeable.unsqueeze(1),
                                             magicable.unsqueeze(1)],
                                            dim=1)
@@ -417,7 +418,7 @@ class NMMONet(nn.Module):
         self.core = nn.Linear(512 + 8 * 15 * 15, 512)
 
         self.act = nn.ReLU()
-        self.unit_nn = nn.Linear(77, 48)
+        self.unit_nn = nn.Linear(69, 48)
         self.unit_transformer = nn.TransformerEncoder(
             nn.TransformerEncoderLayer(d_model=48, nhead=4, dim_feedforward=96, batch_first=True),
             num_layers=3)
@@ -463,7 +464,7 @@ class NMMONet(nn.Module):
 
         team_in = F.one_hot(team_in, num_classes=17).flatten(0, 1)   # T*B 100 17
         entity_in = F.one_hot(entity_in, num_classes=9).flatten(0, 1)  # T*B 100 9
-        obs_emb = obs_emb.flatten(0, 1)  # T*B 100 51
+        obs_emb = obs_emb.flatten(0, 1)  # T*B 100 43
         entity_emb = torch.cat([obs_emb, entity_in, team_in], dim=2)   # T*B 100 77
         # print(entity_emb.shape)
         # print(entity_emb[0, -5:, :])
@@ -493,7 +494,7 @@ class NMMONet(nn.Module):
         lstm_input_ = self.mix_fc(lstm_input_before).view(T, B//8, 8,  512)
         # print(lstm_input_.shape)
         lstm_input_p1, lstm_input_p2 = lstm_input_[:, :, :, :128], lstm_input_[:, :, :, 128:]
-        lstm_input_p1 = torch.max(lstm_input_p1, 2)[0].unsqueeze(2).repeat(1, B//8, 8, 1)
+        lstm_input_p1 = torch.max(lstm_input_p1, 2)[0].unsqueeze(2).repeat(1, 1, 8, 1)
         lstm_input = torch.cat([lstm_input_p1, lstm_input_p2], dim=-1).view(T, B, 512)
 
         lstm_output, out_state = self.core_lstm(lstm_input, state)
