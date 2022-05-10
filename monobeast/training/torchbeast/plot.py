@@ -5,7 +5,7 @@ import argparse
 STATS = [
     "total_loss", "mean_episode_return", "mean_episode_step", "pg_loss",
     "baseline_loss", "entropy_loss",
-    # "rho", "advantage", "grad_norm"
+    "rho", "advantage", "grad_norm"
 ]
 N_COLUMN = 3
 
@@ -33,7 +33,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--logfile",
         type=str,
-        default="5_8_attack/nmmo/logs.csv",
+        default="5_10_attack/nmmo/logs.csv",
     )
     args = parser.parse_args()
     plot(args.logfile)
