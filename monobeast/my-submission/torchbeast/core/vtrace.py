@@ -55,10 +55,23 @@ def action_log_probs(policy_logits, actions):
     ).view_as(actions)
 
 
+# def action_log_probs(logits, action):
+#     action = action.long().unsqueeze(-1)
+#     return torch.gather(logits, -1, action).view_as(action)
+
 def from_logits(
-    behavior_policy_logits,
-    target_policy_logits,
-    actions,
+    behavior_move_logits,
+    behavior_type_logits,
+    behavior_unit_logits,
+    target_move_logits,
+    target_type_logits,
+    target_not_attack_unit_logits,
+    target_melee_attack_unit_logits,
+    target_range_attack_unit_logits,
+    target_magic_attack_unit_logits,
+    actions_move,
+    actions_type,
+    actions_unit_id,
     discounts,
     rewards,
     values,
@@ -67,9 +80,24 @@ def from_logits(
     clip_pg_rho_threshold=1.0,
 ):
     """V-trace for softmax policies."""
+    behavior_move_log_probs = action_log_probs(behavior_move_logits, actions_move)
+    behavior_type_log_probs = action_log_probs(behavior_type_logits, actions_type)
+    behavior_unit_log_probs = action_log_probs(behavior_unit_logits, actions_unit_id)  # 查看mask的type=0
+    behavior_unit_log_probs[actions_type == 0] = 0
+    behavior_action_log_probs = behavior_move_log_probs + behavior_type_log_probs + behavior_unit_log_probs
 
-    target_action_log_probs = action_log_probs(target_policy_logits, actions)
-    behavior_action_log_probs = action_log_probs(behavior_policy_logits, actions)
+    target_move_log_probs = action_log_probs(target_move_logits, actions_move)
+    target_type_log_probs = action_log_probs(target_type_logits, actions_type)
+    T, B = actions_type.shape
+    target_unit_logits = torch.concat(
+        [target_not_attack_unit_logits.flatten(0,1).unsqueeze(1), target_melee_attack_unit_logits.flatten(0,1).unsqueeze(1),
+         target_range_attack_unit_logits.flatten(0,1).unsqueeze(1), target_magic_attack_unit_logits.flatten(0,1).unsqueeze(1)],
+        dim=1
+    )[range(0, T * B), actions_type.flatten(0,1)].view(T,B,-1)
+    target_unit_log_probs = action_log_probs(target_unit_logits, actions_unit_id)
+    target_unit_log_probs[actions_type == 0] = 0
+    target_action_log_probs = target_move_log_probs + target_type_log_probs + target_unit_log_probs  # chakanshape
+
     log_rhos = target_action_log_probs - behavior_action_log_probs
     vtrace_returns = from_importance_weights(
         log_rhos=log_rhos,

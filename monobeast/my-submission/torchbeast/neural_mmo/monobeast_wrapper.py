@@ -61,8 +61,18 @@ class MonobeastWrapper:
                       episode_step=None):
         assert isinstance(frame,
                           dict), f"only support frame in the format of dict"
-        if actions is None:
-            actions = {agent_id: 0 for agent_id in self.gym_env.agents}
+
+        action_move = {agent_id: 0 for agent_id in self.gym_env.agents}
+        action_type = {agent_id: 0 for agent_id in self.gym_env.agents}
+        action_unit = {agent_id: 0 for agent_id in self.gym_env.agents}
+        if actions:
+            for agent_id, val in actions.items():
+                move = val['action_move']
+                type = val['action_type']
+                target = val['action_unit_id']
+                action_move[agent_id] =  move
+                action_type[agent_id] = type
+                action_unit[agent_id] = target
         if reward is None:
             reward = {agent_id: 0 for agent_id in self.gym_env.agents}
         if done is None:
@@ -81,7 +91,9 @@ class MonobeastWrapper:
                 raise RuntimeError
 
         frame = tree.map_structure(_format, frame)
-        actions = tree.map_structure(_format, actions)
+        action_move = tree.map_structure(_format, action_move)
+        action_type = tree.map_structure(_format, action_type)
+        action_unit = tree.map_structure(_format, action_unit)
         reward = tree.map_structure(_format, reward)
         done = tree.map_structure(_format, done)
         episode_return = tree.map_structure(_format, episode_return)
@@ -91,7 +103,10 @@ class MonobeastWrapper:
         for agent_id in self.gym_env.agents:
             o = {}
             o.update(frame[agent_id])
-            o["last_action"] = actions[agent_id]
+            # o["last_action"] = actions[agent_id]
+            o["last_action_move"] = action_move[agent_id]
+            o["last_action_type"] = action_type[agent_id]
+            o["last_action_unit"] = action_unit[agent_id]
             o["reward"] = reward[agent_id]
             o["done"] = done[agent_id]
             o["episode_return"] = episode_return[agent_id]
