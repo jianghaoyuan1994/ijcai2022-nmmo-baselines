@@ -146,12 +146,12 @@ def compute_entropy_loss(dist_move, dis_type, dis_unit, action_type, mask=None):
     log_policy_type = F.log_softmax(dis_type, dim=-1)
     loss_type = policy_type * log_policy_type
 
-    policy_unit = F.softmax(dis_unit, dim=-1)
-    log_policy_unit = F.log_softmax(dis_unit, dim=-1)
-    loss_unit = policy_unit * log_policy_unit
-    loss_unit[action_type == 0] = 0
+    # policy_unit = F.softmax(dis_unit, dim=-1)  # todo
+    # log_policy_unit = F.log_softmax(dis_unit, dim=-1)
+    # loss_unit = policy_unit * log_policy_unit
+    # loss_unit[action_type == 0] = 0
 
-    loss = loss_move.sum(-1) + loss_type.sum(-1) + loss_unit.sum(-1)
+    loss = loss_move.sum(-1) + loss_type.sum(-1)
 
     loss *= mask
     return torch.sum(loss) / torch.sum(mask)
@@ -159,7 +159,10 @@ def compute_entropy_loss(dist_move, dis_type, dis_unit, action_type, mask=None):
 
 def compute_policy_gradient_loss(target_move_logits,
                                  target_type_logits,
-                                 target_unit_logits,
+                                 dis_not_attack_unit,
+                                 dis_melee_attack_unit,
+                                 dis_range_attack_unit,
+                                 dis_magic_attack_unit,
                                  actions_move,
                                  actions_type,
                                  actions_unit_id,
@@ -177,6 +180,16 @@ def compute_policy_gradient_loss(target_move_logits,
         target=torch.flatten(actions_type, 0, 1),
         reduction="none",
     )
+
+    T,B = actions_type.shape
+    target_unit_logits = torch.concat(
+        [dis_not_attack_unit.flatten(0, 1).unsqueeze(1),
+         dis_melee_attack_unit.flatten(0, 1).unsqueeze(1),
+         dis_range_attack_unit.flatten(0, 1).unsqueeze(1),
+         dis_magic_attack_unit.flatten(0, 1).unsqueeze(1)],
+        dim=1
+    )[range(0, T * B), actions_type.flatten(0, 1)].view(T, B, -1)
+
     cross_entropy_unit = F.nll_loss(
         F.log_softmax(torch.flatten(target_unit_logits, 0, 1), dim=-1),
         target=torch.flatten(actions_unit_id, 0, 1),
@@ -184,7 +197,7 @@ def compute_policy_gradient_loss(target_move_logits,
     )
     cross_entropy_unit[torch.flatten(actions_type, 0, 1) == 0] = 0
 
-    cross_entropy = cross_entropy_move + cross_entropy_type + cross_entropy_unit
+    cross_entropy = cross_entropy_move + cross_entropy_type + cross_entropy_unit  # todo shape
 
     cross_entropy = cross_entropy.view_as(advantages)
     loss = cross_entropy * advantages.detach()
@@ -274,7 +287,7 @@ def act(
         agent_state = model.initial_state(batch_size=8)
         env_output_batch, agent_ids = batch(
             env_output, filter_keys=gym_env.observation_space.keys())
-        agent_output_batch, unused_state = model(env_output_batch, agent_state)
+        agent_output_batch, unused_state = model(env_output_batch, agent_state, is_train=False)
         agent_output, hidden = unbatch(agent_output_batch, agent_state, agent_ids)
         while True:
 
@@ -298,7 +311,7 @@ def act(
                         filter_keys=gym_env.observation_space.keys())
                     # forward inference
                     agent_output_batch, agent_state = model(
-                        env_output_batch, agent_state)
+                        env_output_batch, agent_state, is_train=False)
                     # unbatch
                     agent_output, hidden = unbatch(agent_output_batch, agent_state, agent_ids)
                     # extract actions
@@ -345,7 +358,8 @@ def get_batch(
 ):
     with lock:
         timings.time("lock")
-        indices = [full_queue.get() for _ in range(flags.batch_size)]
+        indices = sorted([full_queue.get() for _ in range(flags.batch_size)])
+
         # assert (indices[-1] - indices[0] + 1) % 8 == 0 and \
         #        (indices[-1] - indices[0] + 1) == len(indices), "{}".format(indices)
         timings.time("dequeue")
@@ -400,7 +414,7 @@ def learn(
 ):
     """Performs a learning (optimization) step."""
     with lock:
-        learner_outputs, unused_state = model(batch, initial_agent_state)
+        learner_outputs, unused_state = model(batch, initial_agent_state, is_train=True)
 
         # Take final value function slice for bootstrapping.
         bootstrap_value = learner_outputs["baseline"][-1]
@@ -427,7 +441,10 @@ def learn(
             behavior_unit_logits=batch["dis_unit"],
             target_move_logits=learner_outputs["dist_move"],
             target_type_logits=learner_outputs["dis_type"],
-            target_unit_logits=learner_outputs["dis_unit"],
+            target_not_attack_unit_logits=learner_outputs["dis_not_attack_unit"],
+            target_melee_attack_unit_logits=learner_outputs["dis_melee_attack_unit"],
+            target_range_attack_unit_logits=learner_outputs["dis_range_attack_unit"],
+            target_magic_attack_unit_logits=learner_outputs["dis_magic_attack_unit"],
             actions_move=batch["action_move"],
             actions_type=batch["action_type"],
             actions_unit_id=batch["action_unit_id"],
@@ -440,7 +457,10 @@ def learn(
         pg_loss = compute_policy_gradient_loss(
             learner_outputs["dist_move"],
             learner_outputs["dis_type"],
-            learner_outputs["dis_unit"],
+            learner_outputs["dis_not_attack_unit"],
+            learner_outputs["dis_melee_attack_unit"],
+            learner_outputs["dis_range_attack_unit"],
+            learner_outputs["dis_magic_attack_unit"],
             batch["action_move"],
             batch["action_type"],
             batch["action_unit_id"],
@@ -452,7 +472,7 @@ def learn(
         entropy_loss = flags.entropy_cost * compute_entropy_loss(
             learner_outputs["dist_move"],
             learner_outputs["dis_type"],
-            learner_outputs["dis_unit"],
+            learner_outputs["dis_not_attack_unit"],
             batch["action_type"],
             mask=mask)
 
@@ -583,7 +603,7 @@ def train(flags):  # pylint: disable=too-many-branches, too-many-statements
 
     env = create_env(flags)
 
-    model = Net(env.observation_space, env.action_space.n, flags.use_lstm)
+    model = Net()
     buffers = create_buffers(flags, env.observation_space, env.action_space.n)
 
     model.share_memory()
@@ -610,8 +630,7 @@ def train(flags):  # pylint: disable=too-many-branches, too-many-statements
                                     full_queue, buffers,
                                     initial_agent_state_buffers)
 
-    learner_model = Net(env.observation_space.shape, env.action_space.n,
-                        flags.use_lstm).to(device=flags.device)
+    learner_model = Net().to(device=flags.device)
 
     optimizer = torch.optim.RMSprop(
         learner_model.parameters(),
@@ -625,19 +644,21 @@ def train(flags):  # pylint: disable=too-many-branches, too-many-statements
         return 1 - min(epoch * T * B, flags.total_steps) / flags.total_steps
 
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
+    step, stats = 0, {}
 
-    # checkpoint_dir = Path(flags.savedir).joinpath(flags.xpid)
-    # all_checkpoint = glob.glob(
-    #     checkpoint_dir.joinpath("model_*").resolve().as_posix())
-    # if all_checkpoint:
-    #     checkpointpath = sorted(all_checkpoint, key=os.path.getmtime,
-    #                             reverse=True)[0]
-    #     logging.info(f"Loading checkpoint from path: {checkpointpath}")
-    #     load_model(
-    #         checkpointpath,
-    #         learner_model, optimizer, scheduler
-    #         )
-    #     logging.info(f"Load checkpoint done!")
+    checkpoint_dir = Path(flags.savedir).joinpath(flags.xpid)
+    all_checkpoint = glob.glob(
+        checkpoint_dir.joinpath("model_*").resolve().as_posix())
+    if all_checkpoint:
+        checkpointpath_ = sorted(all_checkpoint, key=os.path.getmtime,
+                                reverse=True)[0]
+        step = int(checkpointpath_.split("/")[-1].split("_")[-1][:-3])
+        logging.info(f"Loading checkpoint from path: {checkpointpath_}")
+        load_model(
+            checkpointpath_,
+            learner_model, optimizer, scheduler
+            )
+        logging.info(f"Load checkpoint done!")
 
     logger = logging.getLogger("logfile")
     stat_keys = [
@@ -652,9 +673,6 @@ def train(flags):  # pylint: disable=too-many-branches, too-many-statements
         "grad_norm",
     ]
     logger.info("# Step\t%s", "\t".join(stat_keys))
-
-
-    step, stats = 0, {}
 
     def batch_and_learn(i, lock=threading.Lock()):
         """Thread target for the learning process."""
@@ -742,7 +760,8 @@ def train(flags):  # pylint: disable=too-many-branches, too-many-statements
                 mean_return,
                 pprint.pformat(stats),
             )
-    except KeyboardInterrupt:
+    except Exception as e:
+        print(e)
         return  # Try joining actors then quit.
     else:
         for thread in threads:
