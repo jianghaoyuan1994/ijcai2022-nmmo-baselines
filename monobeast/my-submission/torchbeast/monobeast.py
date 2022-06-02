@@ -41,7 +41,7 @@ from torchbeast.neural_mmo.monobeast_wrapper import \
 from torchbeast.neural_mmo.net import NMMONet
 from torchbeast.neural_mmo.train_wrapper import TrainWrapper
 
-from utils import checkpoint, load_model
+# from utils import checkpoint, load_model
 
 
 to_torch_dtype = {

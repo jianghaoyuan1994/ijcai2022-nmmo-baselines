@@ -146,10 +146,10 @@ def compute_entropy_loss(dist_move, dis_type, dis_unit, action_type, mask=None):
     log_policy_type = F.log_softmax(dis_type, dim=-1)
     loss_type = policy_type * log_policy_type
 
-    # policy_unit = F.softmax(dis_unit, dim=-1)  # todo
-    # log_policy_unit = F.log_softmax(dis_unit, dim=-1)
-    # loss_unit = policy_unit * log_policy_unit
-    # loss_unit[action_type == 0] = 0
+    policy_unit = F.softmax(dis_unit, dim=-1)  # todo
+    log_policy_unit = F.log_softmax(dis_unit, dim=-1)
+    loss_unit = policy_unit * log_policy_unit
+    loss_unit[action_type == 0] = 0
 
     loss = loss_move.sum(-1) + loss_type.sum(-1)
 
@@ -290,9 +290,19 @@ def act(
         agent_output_batch, unused_state = model(env_output_batch, agent_state, is_train=False)
         agent_output, hidden = unbatch(agent_output_batch, agent_state, agent_ids)
         while True:
-
-            free_indices = [free_queue.get() for _ in range(flags.num_agents)]
-            assert free_indices[-1] - free_indices[0] == 7, "{}".format(free_indices)
+            while True:
+                free_indices_ = [free_queue.get() for _ in range(flags.num_agents)]
+                free_indices_ = sorted(free_indices_)
+                if free_indices_[-1] - free_indices_[0] == 7 and free_indices_[0] % 8 == 0:
+                    free_indices = free_indices_
+                    break
+                else:
+                    print("act {}".format(free_indices_))
+                    [full_queue.put(index) for index in free_indices_]
+        # while True:
+        #
+        #     free_indices = [free_queue.get() for _ in range(flags.num_agents)]
+        #     assert free_indices[-1] - free_indices[0] == 7, "{}".format(free_indices)
             if None in free_indices:
                 break
 
@@ -358,7 +368,21 @@ def get_batch(
 ):
     with lock:
         timings.time("lock")
-        indices = sorted([full_queue.get() for _ in range(flags.batch_size)])
+        indices_ = []
+        flag = True
+        while flag:
+            indices_.extend([full_queue.get() for _ in range(flags.batch_size)])
+            indices_ = sorted(indices_)
+            i = 0
+            while i < len(indices_) - 8:
+                if indices_[i+7] - indices_[i] == 7 and indices_[i] % 8 == 0:
+                    indices = indices_[i:i+8]
+                    flag = False
+                    break
+                else:
+                    print("get_batch {}-{}".format(i, len(indices_)))
+                    i += 1
+        # indices = sorted([full_queue.get() for _ in range(flags.batch_size)])
 
         # assert (indices[-1] - indices[0] + 1) % 8 == 0 and \
         #        (indices[-1] - indices[0] + 1) == len(indices), "{}".format(indices)
@@ -387,7 +411,8 @@ def get_batch(
         initial_agent_state = [[h1, c1], [h2, c2]]
 
     timings.time("batch")
-    for m in indices:
+    # for m in indices:
+    for m in indices_:
         free_queue.put(m)
     timings.time("enqueue")
     batch = {
@@ -490,7 +515,7 @@ def learn(
         actor_model.load_state_dict(model.state_dict())
 
         stats = {
-            # "episode_returns": tuple(episode_returns.cpu().numpy()),
+            "episode_returns": tuple(episode_returns.cpu().numpy()),
             "mean_episode_return": torch.mean(episode_returns).item(),
             "mean_episode_step": torch.mean(episode_steps.float()).item(),
             "total_loss": total_loss.item(),
@@ -505,7 +530,7 @@ def learn(
         return stats
 
 
-def create_buffers(flags, observation_space, num_actions) -> Buffers:
+def create_buffers(flags, observation_space) -> Buffers:
     T = flags.unroll_length
     # observation_space is a dict
     obs_specs = {
@@ -583,7 +608,7 @@ def train(flags):  # pylint: disable=too-many-branches, too-many-statements
                                      rootdir=flags.savedir)
     checkpointpath = Path(flags.savedir).joinpath(flags.xpid)
     if flags.num_buffers is None:  # Set sensible default for num_buffers.
-        flags.num_buffers = max(2 * flags.num_agents * flags.num_actors,
+        flags.num_buffers = max(8 * flags.num_agents * flags.num_actors,
                                 flags.batch_size)
     if flags.num_actors >= flags.num_buffers:
         raise ValueError("num_buffers should be larger than num_actors")
@@ -604,7 +629,7 @@ def train(flags):  # pylint: disable=too-many-branches, too-many-statements
     env = create_env(flags)
 
     model = Net()
-    buffers = create_buffers(flags, env.observation_space, env.action_space.n)
+    buffers = create_buffers(flags, env.observation_space)
 
     model.share_memory()
 
@@ -699,26 +724,6 @@ def train(flags):  # pylint: disable=too-many-branches, too-many-statements
 
         if i == 0:
             logging.info("Batch and learn: %s", timings.summary())
-    # def batch_and_learn_test(i):
-    #     """Thread target for the learning process."""
-    #     nonlocal step, stats
-    #     timings = prof.Timings()
-    #     while step < flags.total_steps:
-    #         timings.reset()
-    #         batch, agent_state = get_batch(
-    #             flags,
-    #             free_queue,
-    #             full_queue,
-    #             buffers,
-    #             initial_agent_state_buffers,
-    #             timings,
-    #         )
-    #         stats = learn(flags, model, learner_model, batch, agent_state,
-    #                       optimizer, scheduler)
-    #         timings.time("learn")
-    #
-    #     if i == 0:
-    #         logging.info("Batch and learn: %s", timings.summary())
 
     threads = []
     # batch_and_learn_test(0)  # todo remove this line
@@ -738,7 +743,7 @@ def train(flags):  # pylint: disable=too-many-branches, too-many-statements
             time.sleep(5)
 
             if timer() - last_checkpoint_time > flags.checkpoint_interval:
-                checkpoint(flags, logging, checkpointpath, model, optimizer, step, scheduler)
+                checkpoint(flags, logging, checkpointpath, learner_model, optimizer, step, scheduler)
                 last_checkpoint_time = timer()
                 actor_processes = start_process(flags, ctx, model, actor_processes,
                                                 free_queue, full_queue,

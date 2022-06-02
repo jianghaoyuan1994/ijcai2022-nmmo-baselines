@@ -36,7 +36,6 @@ class FeatureParser:  # 环境obs解析
         # self.onehot = np.eye(self.channel_num)  # todo move to model
         self.onehot_team = np.eye(17)
         self.onehot_index = np.eye(9)
-        self.now_time = 0
 
     def parse(self, obs):
 
@@ -47,7 +46,7 @@ class FeatureParser:  # 环境obs解析
             # va_attack = np.zeros(self.n_attack_actions, dtype=np.int64)
             # va_attack_id = []
             obs_agents = obs[entity]["Entity"]["Continuous"]
-            self.now_time = max(max(obs_agents[:, 8]), self.now_time)
+            now_time = max(obs_agents[:, 8])
 
             # agents_frame = obs_agents.reshape(-1) / np.linalg.norm(
             #     obs_agents.reshape(-1))   #TODO normalize
@@ -82,6 +81,7 @@ class FeatureParser:  # 环境obs解析
             rangeable = []
             meleeable = []
             all_is_attack = np.array([1, 0, 0, 0])
+            reverse_team_id = None
             while index < 100:
                 is_mine = 1 if index ==0 else 0
                 value = obs_agents[index]
@@ -105,6 +105,12 @@ class FeatureParser:  # 环境obs解析
 
                 assert value[4] != 16
                 team_in_ = value[4] if value[4] >= 0 else 16
+                if index == 0:
+                    reverse_team_id = team_in_
+                if team_in_ == 0:
+                    team_in_ = reverse_team_id
+                elif team_in_ == reverse_team_id:
+                    team_in_ = 0
                 team_in.append(team_in_)
 
                 r_in = value[5]
@@ -156,13 +162,13 @@ class FeatureParser:  # 环境obs解析
                 dr_in /= 10
                 r_in = r_in / 8
                 c_in = c_in / 8
-                alive_in = 0 if value[8] < self.now_time else 1
+                alive_in = 0 if value[8] < now_time else 1
                 food_in = value[9] / 10   # 最大与等级相等
                 water_in = value[10] / 10  # 最大与等级相等
                 health_in = value[11] / 10  # 最大与等级相等
-                food_re = value[9] / max(level_in, 10)
-                water_re = value[10] / max(level_in, 10)
-                health_re = value[11] / max(level_in, 10)
+                food_re = value[9] / max(level_in * 10, 10)
+                water_re = value[10] / max(level_in * 10, 10)
+                health_re = value[11] / max(level_in * 10, 10)
                 freezed_in = value[12]   # todo 加入目前freezed了多久
                 obs_num_part[index, :] = np.hstack([level_in, r_in, c_in, dr_in, dc_in, is_mine,
                                                     alive_in, food_in, water_in, health_in, food_re, water_re,
@@ -319,11 +325,11 @@ class TrainWrapper(Wrapper):
         for i in range(config.NPOP):
             if i == self.TT_ID:
                 continue
-            if self.TT_ID < i <= self.TT_ID + 7:
+            if self.TT_ID < i <= self.TT_ID + 5:
                 self._scripted_team[i] = RandomTeam(f"random-{i}", config)
-            elif self.TT_ID + 7 < i <= self.TT_ID + 12:
+            elif self.TT_ID + 5 < i <= self.TT_ID + 10:
                 self._scripted_team[i] = ForageTeam(f"forage-{i}", config)
-            elif self.TT_ID + 12 < i <= self.TT_ID + 15:
+            elif self.TT_ID + 10 < i <= self.TT_ID + 15:
                 self._scripted_team[i] = CombatTeam(f"combat-{i}", config)
 
     def get_scripted_team_decision(self, observations):
@@ -336,8 +342,8 @@ class TrainWrapper(Wrapper):
         return decisions
 
     @staticmethod
-    def  transform_action(actions, observations=None, auxiliary_script=None):
-        """neural network move + scripted attack"""
+    def transform_action(actions, observations=None):
+        """neural network move + attack"""
         decisions = {}
 
         # move decisions
@@ -365,14 +371,6 @@ class TrainWrapper(Wrapper):
                         nmmo.action.Target: target
                     }
                 }
-        # # attack decisions
-        # if auxiliary_script is not None:
-        #     assert observations is not None
-        #     attack_decisions = auxiliary_script.act(observations)
-        #     # merge decisions
-        #     for agent_id, d in decisions.items():
-        #         d.update(attack_decisions[agent_id])
-        #         decisions[agent_id] = d
         return decisions
 
 

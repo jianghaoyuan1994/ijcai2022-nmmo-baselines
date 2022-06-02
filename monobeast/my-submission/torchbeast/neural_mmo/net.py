@@ -458,7 +458,6 @@ class NMMONet(nn.Module):
         #     nn.ReLU(),
         # )
         self.spatialEncoder = SpatialEncoder()
-        self.core = nn.Linear(512 + 8 * 15 * 15, 512)
 
         self.act = nn.ReLU()
         self.unit_nn = nn.Linear(70, 48)
@@ -541,14 +540,14 @@ class NMMONet(nn.Module):
         lstm_input = torch.cat([lstm_input_p1, lstm_input_p2], dim=-1).view(T, B, 512)
 
         lstm_output, out_state = self.core_lstm(lstm_input, state)
-        baseline = self.baseline(lstm_input)
+        baseline = self.baseline(lstm_output)
         baseline = baseline.view(T, B)
 
         if is_train:
             dist_move, dis_type, \
             dis_not_attack_unit, dis_melee_attack_unit, dis_range_attack_unit, dis_magic_attack_unit, \
             action_move, action_type, action_unit_id = \
-                self.policy(lstm_input.flatten(0, 1), entity_embeddings_mask, entity_id,
+                self.policy(lstm_output.flatten(0, 1), entity_embeddings_mask, entity_id,
                             rangeable, meleeable, magicable, mask, va_move, is_attack, is_train)
             dist_move = dist_move.view(T, B, -1)
             dis_type = dis_type.view(T, B, -1)
@@ -572,7 +571,7 @@ class NMMONet(nn.Module):
                     out_state)
         else:
             dist_move, dis_type, dis_unit, action_move, action_type, action_unit_id = \
-                self.policy(lstm_input.flatten(0, 1), entity_embeddings_mask, entity_id,
+                self.policy(lstm_output.flatten(0, 1), entity_embeddings_mask, entity_id,
                             rangeable, meleeable, magicable, mask, va_move, is_attack, is_train)
 
             dist_move = dist_move.view(T, B, -1)
