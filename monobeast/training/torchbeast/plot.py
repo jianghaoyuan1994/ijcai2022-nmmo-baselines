@@ -15,7 +15,7 @@ def plot(log_file, window=500):
     for key in STATS + ["step"]:
         assert key in log_df.columns
     fig, axes = plt.subplots(len(STATS) // N_COLUMN, N_COLUMN)
-    fig.suptitle("Learning curves on IJCAI2022-NMMO PVE STAGE1", fontsize=20)
+    fig.suptitle("Learning curves on IJCAI2022-NMMO", fontsize=20)
     fig.set_size_inches(18, 10)
     for i, key in enumerate(STATS):
         df = log_df[["step", key]].dropna()
@@ -33,7 +33,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--logfile",
         type=str,
-        default="5_10_attack/nmmo/logs.csv",
+        default="6_2_attack/nmmo/logs.csv",
     )
     args = parser.parse_args()
     plot(args.logfile)

@@ -88,6 +88,7 @@ class MonobeastWrapper:
             elif isinstance(x, (int, float)):
                 return torch.tensor(x).view(1, 1)
             else:
+                print(x)
                 raise RuntimeError
 
         frame = tree.map_structure(_format, frame)

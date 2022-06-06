@@ -368,21 +368,19 @@ def get_batch(
 ):
     with lock:
         timings.time("lock")
+        indices = []
         indices_ = []
-        flag = True
-        while flag:
+        while len(indices) == 0:
             indices_.extend([full_queue.get() for _ in range(flags.batch_size)])
             indices_ = sorted(indices_)
             i = 0
-            while i < len(indices_) - 8:
-                if indices_[i+7] - indices_[i] == 7 and indices_[i] % 8 == 0:
-                    indices = indices_[i:i+8]
-                    flag = False
-                    break
+            while i < len(indices_) - 7:
+                if indices_[i] % 8 == 0 and indices_[i+7] - indices_[i] == 7:
+                    indices.extend(indices_[i:i+8])
+                    i += 8
                 else:
                     print("get_batch {}-{}".format(i, len(indices_)))
                     i += 1
-        # indices = sorted([full_queue.get() for _ in range(flags.batch_size)])
 
         # assert (indices[-1] - indices[0] + 1) % 8 == 0 and \
         #        (indices[-1] - indices[0] + 1) == len(indices), "{}".format(indices)
@@ -391,10 +389,8 @@ def get_batch(
         key: torch.stack([buffers[key][m] for m in indices], dim=1)
         for key in buffers
     }
-    initial_agent_state = tuple()
+
     if flags.use_lstm:
-        # initial_agent_state = (torch.cat(ts, dim=1) for ts in zip(
-        #     *[initial_agent_state_buffers[m] for m in indices]))
         h1, c1, h2, c2 = [], [], [], []
         for m in indices:
             for layer, val in enumerate(initial_agent_state_buffers[m]):
@@ -419,10 +415,6 @@ def get_batch(
         k: t.to(device=flags.device, non_blocking=True)
         for k, t in batch.items()
     }
-    # if flags.use_lstm:
-    #     initial_agent_state = tuple(
-    #         t.to(device=flags.device, non_blocking=True)
-    #         for t in initial_agent_state)
     timings.time("device")
     return batch, initial_agent_state
 
@@ -515,7 +507,7 @@ def learn(
         actor_model.load_state_dict(model.state_dict())
 
         stats = {
-            "episode_returns": tuple(episode_returns.cpu().numpy()),
+            "episode_returns": episode_returns.cpu().numpy(),
             "mean_episode_return": torch.mean(episode_returns).item(),
             "mean_episode_step": torch.mean(episode_steps.float()).item(),
             "total_loss": total_loss.item(),
@@ -743,7 +735,7 @@ def train(flags):  # pylint: disable=too-many-branches, too-many-statements
             time.sleep(5)
 
             if timer() - last_checkpoint_time > flags.checkpoint_interval:
-                checkpoint(flags, logging, checkpointpath, learner_model, optimizer, step, scheduler)
+                checkpoint(flags, logging, checkpointpath, model, optimizer, step, scheduler)
                 last_checkpoint_time = timer()
                 actor_processes = start_process(flags, ctx, model, actor_processes,
                                                 free_queue, full_queue,
@@ -841,7 +833,7 @@ Net = NMMONet
 
 def create_env(flags):
     cfg = CompetitionConfig()
-    cfg.NMAPS = 4000  # im: add random map nums
+    cfg.NMAPS = 40000  # im: add random map nums
     if flags.mode == "test_render":
         cfg.RENDER = True
     return TrainWrapper(TeamBasedEnv(config=cfg))

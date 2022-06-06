@@ -215,17 +215,16 @@ def fc_block(
 
 
 class SpatialEncoder(nn.Module):
-    def __init__(self, input_dim=55, project_dim=32):
+    def __init__(self, input_dim=55, project_dim=64):
         super(SpatialEncoder, self).__init__()
         self.act = nn.ReLU()
         self.project = conv2d_block(input_dim, project_dim, 1, 1, 0, activation=self.act)
         self.res = nn.ModuleList()
         self.resblock_num = 2
         for i in range(self.resblock_num):
-            self.res.append(ResBlock(project_dim, 2*project_dim, self.act))
+            self.res.append(ResBlock(project_dim, project_dim, self.act))
 
-        self.fc1 = fc_block(7200, 1024, self.act)
-        self.fc2 = fc_block(1024, 256, self.act)
+        self.fc1 = fc_block(14400, 560, self.act)
 
     def forward(self, x, scatter_map):
         # print(x.shape, scatter_map.shape)
@@ -235,7 +234,6 @@ class SpatialEncoder(nn.Module):
             x = block(x)
         x = x.view(x.shape[0], -1)
         x = self.fc1(x)
-        x = self.fc2(x)
         return x
 
 
@@ -282,7 +280,7 @@ class AttackHead(nn.Module):
         super(AttackHead, self).__init__()
         self.act = nn.ReLU()
         # attack type
-        self.project = fc_block(256, 128, activation=self.act, norm_type=None)
+        self.project = fc_block(512, 128, activation=self.act, norm_type=None)
         blocks = [ResFCBlock(128, self.act, 'LN') for _ in range(2)]
         self.res = nn.Sequential(*blocks)
         # self.action_fc = GLU(128, 4, 128)
@@ -299,7 +297,7 @@ class AttackHead(nn.Module):
 
         # select unit
         self.key_fc = fc_block(48, 32, activation=None, norm_type=None)
-        self.query_fc1 = fc_block(256, 128, activation=self.act, norm_type=None)
+        self.query_fc1 = fc_block(512, 128, activation=self.act, norm_type=None)
         self.query_fc2 = fc_block(128, 32, activation=None, norm_type=None)
         self.key_dim = 32
 
@@ -409,7 +407,7 @@ class AttackHead(nn.Module):
 class Policy(nn.Module):
     def __init__(self):
         super(Policy, self).__init__()
-        self.move_head = fc_block(256, 5, nn.ReLU())
+        self.move_head = fc_block(512, 5, nn.ReLU())
         self.attack_type_unit_id_head = AttackHead()
 
     def forward(self, lstm_output, entity_embeddings, entity_id,
@@ -446,57 +444,77 @@ class Policy(nn.Module):
             return dist_move.logits, dis_type, dis_unit, action_move, action_type, action_unit_id
 
 
+def compute_denominator(x: torch.Tensor, dim: int) -> torch.Tensor:
+    x = x // 2 * 2
+    x = torch.div(x, dim)
+    x = torch.pow(10000., x)
+    x = torch.div(1., x)
+    return x
+
+
 class NMMONet(nn.Module):
     def __init__(self):
         super().__init__()
-        # self.mlp = nn.Sequential(
-        #     nn.Linear(1300, 2048),
-        #     nn.ReLU(),
-        #     nn.Linear(2048, 1024),
-        #     nn.ReLU(),
-        #     nn.Linear(1024, 512),
-        #     nn.ReLU(),
-        # )
         self.spatialEncoder = SpatialEncoder()
 
+        self.time_embedding_dim = 16
+        self.position_array = torch.nn.Parameter(
+            compute_denominator(torch.arange(0, 16, dtype=torch.float),
+                                16), requires_grad=False)
+
         self.act = nn.ReLU()
-        self.unit_nn = nn.Linear(70, 48)
+        self.unit_nn = nn.Linear(70, 96)
         self.unit_transformer = nn.TransformerEncoder(
+            nn.TransformerEncoderLayer(d_model=96, nhead=4, dim_feedforward=128, batch_first=True),
+            num_layers=3)
+
+        self.unit_team = nn.Linear(44, 45)
+        self.team_transformer = nn.TransformerEncoder(
             nn.TransformerEncoderLayer(d_model=48, nhead=4, dim_feedforward=96, batch_first=True),
             num_layers=3)
-        self.entity_fc = fc_block(48, 48, activation=self.act)
-        self.embed_fc = fc_block(48, 64, activation=self.act)
 
-        self.mix_fc = fc_block(368, 512, activation=self.act)
+        self.entity_fc = fc_block(96, 48, activation=self.act)
+        self.embed_fc = fc_block(96, 64, activation=self.act)
+
+        self.mix_fc = fc_block(624, 624, activation=self.act)
 
         self.num_layers = 2
         self.core_lstm = StackedLSTM(num_layers=self.num_layers, layer=LSTMLayer,
-                                     first_layer_args=[LayerNormLSTMCell, 512, 256],
-                                     other_layer_args=[LayerNormLSTMCell, 256, 256])
+                                     first_layer_args=[LayerNormLSTMCell, 1024, 512],
+                                     other_layer_args=[LayerNormLSTMCell, 512, 512])
         #
         self.policy = Policy()
 
         # self.policy_move = nn.Linear(512, 5)
         # self.policy_attack_type = nn.Linear(512, 4)
         # self.policy_attack_unit_core = nn.Linear(512,5120)
-        self.baseline = nn.Linear(256, 1)
+        self.baseline = nn.Linear(512, 1)
 
         self.attack_emb = nn.Embedding(512, 4)
 
+    def time_encoder(self, x: Tensor):
+        v = torch.zeros(size=(x.shape[0], self.time_embedding_dim), dtype=torch.float, device=x.device)
+        assert len(x.shape) == 1, "{}".format(x.shape)
+        x = x.unsqueeze(dim=1)
+        v[:, 0::2] = torch.sin(x * self.position_array[0::2])  # even
+        v[:, 1::2] = torch.cos(x * self.position_array[1::2])  # odd
+        return v
+
     def initial_state(self, batch_size=1):
-        return torch.zeros(2, 2, batch_size, 256)
+        return torch.zeros(2, 2, batch_size, 512)
 
     def forward(self, input_dict, state=(), is_train=False):
         # [T, B, ...]
         # print(input_dict.keys())
-        agent_map, entity_id, entity_in, rangeable, team_in, va_move, \
-        obs_emb, meleeable, mask, magicable, local_map, entity_loc, is_attack = \
+        agent_map, entity_id, entity_in, rangeable, team_in, va_move, obs_emb, meleeable, \
+        mask, magicable, local_map, entity_loc, is_attack, now_time, mine_loc = \
             input_dict["agent_map"], input_dict["entity_id"], input_dict["entity_in"], \
             input_dict["rangeable"], input_dict["team_in"], input_dict["va_move"], \
             input_dict["obs_emb"], input_dict["meleeable"], input_dict["mask"], \
             input_dict["magicable"], input_dict["local_map"], input_dict["entity_loc"], \
-            input_dict["is_attack"]
+            input_dict["is_attack"], input_dict['now_time'], input_dict['mine_loc'].to(torch.float32)
 
+        device = local_map.device
         T, B, H, W = local_map.shape
         # assert B==8, "{}".format(local_map.shape) # warn : B is batch contain
         local_map = F.one_hot(local_map, num_classes=6).permute(0, 1, 4, 2, 3)  # T B C H W
@@ -504,10 +522,13 @@ class NMMONet(nn.Module):
         map_emb = torch.cat([agent_map.flatten(0, 1), local_map], dim=1)  # T*B C 15 15
         # print(map_emb.shape)
 
+        time =  self.time_encoder(now_time.view(-1)).view(T, B//8, 8, -1)
+
+
         team_in = F.one_hot(team_in, num_classes=17).flatten(0, 1)   # T*B 100 17
         entity_in = F.one_hot(entity_in, num_classes=9).flatten(0, 1)  # T*B 100 9
-        obs_emb = obs_emb.flatten(0, 1)  # T*B 100 43
-        entity_emb = torch.cat([obs_emb, entity_in, team_in], dim=2)   # T*B 100 77
+        obs_emb = obs_emb.flatten(0, 1)  # T*B 100 44
+        entity_emb = torch.cat([obs_emb, entity_in, team_in], dim=2)   # T*B 100 70
         # print(entity_emb.shape)
         # print(entity_emb[0, -5:, :])
         mask = mask.flatten(0, 1)
@@ -525,21 +546,36 @@ class NMMONet(nn.Module):
         # print(entity_emb_mask.sum(dim=1).shape, torch.sum(~mask, dim=-1).unsqueeze(dim=-1).shape)   # 8,48  8,1
         embedded_entity = entity_emb_mask.sum(dim=1) / torch.sum(~mask, dim=-1).unsqueeze(dim=-1)
         # print(embedded_entity.shape)   # 8，48
-        embedded_entity = self.embed_fc(embedded_entity)
+        embedded_entity = self.embed_fc(embedded_entity).view(T, B//8, 8, -1)
 
         entity_embeddings_mask = entity_embeddings * (~mask.unsqueeze(dim=2))
-        mine_entity = entity_embeddings_mask[:, 0, :]  # 8 48
+
+        mine_entity = obs_emb[:, 0, :]
+        mine_entity = self.unit_team(mine_entity).view(T, B//8, 1, 8, -1)  # 8 46
+        team_entity_ = mine_entity.repeat_interleave(8, dim=-3) # t b//8 8 8 46
+        team_loc_ = mine_loc.view(T, B//8, 1, 8, -1).repeat_interleave(8, dim=-3) - mine_loc.view(T, B//8, 8, 1, -1).repeat_interleave(8, dim=-2)
+        team_loc_ /= 100
+        team_entity = torch.cat(
+            [team_entity_, team_loc_, torch.eye(8, device=device).unsqueeze(2).repeat(T, B//8, 1, 1, 1)],
+            dim=-1).view(-1, 8, 48)
+        team_entity = self.team_transformer(team_entity).view(T, B//8, 8, -1)
+
         scatter_map = scatter_connection(entity_embeddings_mask, entity_loc.flatten(0, 1))
-        embedded_spatial = self.spatialEncoder(map_emb, scatter_map)
+        embedded_spatial = self.spatialEncoder(map_emb, scatter_map).view(T, B//8, 8, -1)
         # print(embedded_entity.shape, embedded_spatial.shape)  # 8 64  8 256
-        lstm_input_before = torch.cat([embedded_entity, embedded_spatial, mine_entity], dim=-1)  # noteblty
-        lstm_input_ = self.mix_fc(lstm_input_before).view(T, B//8, 8,  512)
+
+
+
+        # lstm_input_before = torch.cat([time, embedded_entity, embedded_spatial, team_entity], dim=-1)  # noteblty
+        lstm_input_before = torch.cat([embedded_entity, embedded_spatial], dim=-1)
+        lstm_input_ = self.mix_fc(lstm_input_before)
         # print(lstm_input_.shape)
-        lstm_input_p1, lstm_input_p2 = lstm_input_[:, :, :, :128], lstm_input_[:, :, :, 128:]
+        lstm_input_p1, lstm_input_p2 = lstm_input_[:, :, :, :208], lstm_input_[:, :, :, 208:]
         lstm_input_p1 = torch.max(lstm_input_p1, 2)[0].unsqueeze(2).repeat(1, 1, 8, 1)
-        lstm_input = torch.cat([lstm_input_p1, lstm_input_p2], dim=-1).view(T, B, 512)
+        lstm_input = torch.cat([lstm_input_p1, lstm_input_p2, time, team_entity], dim=-1).view(T, B, 1024)
 
         lstm_output, out_state = self.core_lstm(lstm_input, state)
+
         baseline = self.baseline(lstm_output)
         baseline = baseline.view(T, B)
 
