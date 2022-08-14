@@ -124,7 +124,7 @@ Buffers = typing.Dict[str, typing.List[torch.Tensor]]
 
 
 def compute_baseline_loss(advantages, mask=None):
-    if mask is not None:
+    if mask is None:
         mask = torch.ones_like(advantages)
     loss = (advantages ** 2)
     loss *= mask
@@ -151,11 +151,10 @@ def compute_entropy_loss(dist_move, dis_type, dis_unit, action_type, mask=None):
     loss_unit = policy_unit * log_policy_unit
     loss_unit[action_type == 0] = 0
 
-    loss = loss_move.sum(-1) + loss_type.sum(-1)
+    loss = loss_move.sum(-1) + loss_type.sum(-1) + loss_unit.sum(-1)
 
     loss *= mask
     return torch.sum(loss) / torch.sum(mask)
-
 
 def compute_policy_gradient_loss(target_move_logits,
                                  target_type_logits,
@@ -618,9 +617,25 @@ def train(flags):  # pylint: disable=too-many-branches, too-many-statements
         logging.info("Not using CUDA.")
         flags.device = torch.device("cpu")
 
+    checkpoint_dir = Path(flags.savedir).joinpath(flags.xpid)
+    all_checkpoint = glob.glob(
+        checkpoint_dir.joinpath("model_*").resolve().as_posix())
+
     env = create_env(flags)
 
     model = Net()
+
+    if all_checkpoint:
+        checkpointpath_ = sorted(all_checkpoint, key=os.path.getmtime,
+                                reverse=True)[0]
+        step = int(checkpointpath_.split("/")[-1].split("_")[-1][:-3])
+        logging.info(f"Loading checkpoint from path: {checkpointpath_}")
+        load_model(
+            checkpointpath_,
+            model,
+            )
+        logging.info(f"Load checkpoint done!")
+
     buffers = create_buffers(flags, env.observation_space)
 
     model.share_memory()
@@ -663,9 +678,7 @@ def train(flags):  # pylint: disable=too-many-branches, too-many-statements
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
     step, stats = 0, {}
 
-    checkpoint_dir = Path(flags.savedir).joinpath(flags.xpid)
-    all_checkpoint = glob.glob(
-        checkpoint_dir.joinpath("model_*").resolve().as_posix())
+
     if all_checkpoint:
         checkpointpath_ = sorted(all_checkpoint, key=os.path.getmtime,
                                 reverse=True)[0]

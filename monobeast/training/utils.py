@@ -57,11 +57,13 @@ def checkpoint(flags, logging, checkpointpath, model, optimizer, step, scheduler
     )
 
 
-def load_model(path, model, optimizer, scheduler):
+def load_model(path, model, optimizer=None, scheduler=None):
     para_dict = torch.load(path)
     model.load_state_dict(para_dict['model_state_dict'])
-    optimizer.load_state_dict(para_dict['optimizer_state_dict'])
-    scheduler.load_state_dict(para_dict['scheduler_state_dict'])
+    if optimizer:
+        optimizer.load_state_dict(para_dict['optimizer_state_dict'])
+    if scheduler:
+        scheduler.load_state_dict(para_dict['scheduler_state_dict'])
     # flags = para_dict['flags']
     # return flags
 # plt_maps()

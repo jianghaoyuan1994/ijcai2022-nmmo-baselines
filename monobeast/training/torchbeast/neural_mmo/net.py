@@ -236,7 +236,6 @@ class SpatialEncoder(nn.Module):
         x = self.fc1(x)
         return x
 
-
 def scatter_connection(project_embeddings, entity_location):
     # print(project_embeddings.shape)  # T*B 100 48
     scatter_dim = project_embeddings.shape[-1]
@@ -463,12 +462,12 @@ class NMMONet(nn.Module):
                                 16), requires_grad=False)
 
         self.act = nn.ReLU()
-        self.unit_nn = nn.Linear(70, 96)
+        self.unit_nn = nn.Linear(41, 68)
         self.unit_transformer = nn.TransformerEncoder(
             nn.TransformerEncoderLayer(d_model=96, nhead=4, dim_feedforward=128, batch_first=True),
             num_layers=3)
 
-        self.unit_team = nn.Linear(44, 45)
+        self.unit_team = nn.Linear(41, 45)
         self.team_transformer = nn.TransformerEncoder(
             nn.TransformerEncoderLayer(d_model=48, nhead=4, dim_feedforward=96, batch_first=True),
             num_layers=3)
@@ -525,14 +524,14 @@ class NMMONet(nn.Module):
         time =  self.time_encoder(now_time.view(-1)).view(T, B//8, 8, -1)
 
 
-        team_in = F.one_hot(team_in, num_classes=17).flatten(0, 1)   # T*B 100 17
+        team_in = F.one_hot(team_in, num_classes=19).flatten(0, 1)   # T*B 100 17
         entity_in = F.one_hot(entity_in, num_classes=9).flatten(0, 1)  # T*B 100 9
         obs_emb = obs_emb.flatten(0, 1)  # T*B 100 44
-        entity_emb = torch.cat([obs_emb, entity_in, team_in], dim=2)   # T*B 100 70
         # print(entity_emb.shape)
         # print(entity_emb[0, -5:, :])
         mask = mask.flatten(0, 1)
-        entity_emb = self.unit_nn(entity_emb)
+        obs_emb_ = self.unit_nn(obs_emb)
+        entity_emb = torch.cat([obs_emb_, entity_in, team_in], dim=2)
         # print(entity_emb.shape)
         entity_emb = self.unit_transformer(entity_emb, src_key_padding_mask=mask)
 

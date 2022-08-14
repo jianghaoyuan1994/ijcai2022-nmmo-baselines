@@ -13,7 +13,7 @@ class FeatureParser:  # 环境obs解析
     NEIGHBOR = [(6, 7), (8, 7), (7, 8), (7, 6)]  # north, south, east, west
     OBSTACLE = (0, 1, 5)  # lava, water, stone  # todo shibushi 3he1 emMetricsbedding
     feature_spec = {
-        "obs_emb": spaces.Box(low=-100, high=1000, shape=(100, 44), dtype=np.float32),
+        "obs_emb": spaces.Box(low=-100, high=1000, shape=(100, 41), dtype=np.float32),
         "local_map": spaces.Box(low=-100, high=1000, shape=(15, 15), dtype=np.int64),
         "agent_map": spaces.Box(low=-100, high=1000, shape=(1, 15, 15), dtype=np.float32),
         "mask": spaces.Box(low=0, high=1, shape=(100,), dtype=np.bool),
@@ -72,7 +72,7 @@ class FeatureParser:  # 环境obs解析
                                  int(line[3] - init_C)] = line[0]
                     assert line[0] <= 1
 
-            obs_num_part = np.zeros((100, 44), dtype="float32")
+            obs_num_part = np.zeros((100, 41), dtype="float32")
             index = 0
             entity_loc = []
             entity_id = []
@@ -109,8 +109,11 @@ class FeatureParser:  # 环境obs解析
                 # attack_id.append(attack_id_)
 
                 level_in = value[3] / 10
+                #
+                # if value[4] < -1:
+                #     print(value[4])
 
-                team_in_ = value[4] if value[4] >= 0 else 16
+                team_in_ = value[4] if value[4] >= 0 else 19 + value[4]
                 if index == 0:
                     reversed_team_id = team_in_
                 if team_in_ == 0:
@@ -174,13 +177,12 @@ class FeatureParser:  # 环境obs解析
                 food_in = value[9] / 20  # 最大与等级相等
                 water_in = value[10] / 20  # 最大与等级相等
                 health_in = value[11] / 20  # 最大与等级相等
-                food_re = value[9] / max(level_in * 10, 10)
-                water_re = value[10] / max(level_in * 10, 10)
-                health_re = value[11] / max(level_in * 10, 10)
+                # food_re = value[9] / max(level_in * 10, 10)
+                # water_re = value[10] / max(level_in * 10, 10)
+                # health_re = value[11] / max(level_in * 10, 10)
                 freezed_in = value[12]  # todo 加入目前freezed了多久
                 obs_num_part[index, :] = np.hstack([level_in, r_in, c_in, dr_in, dc_in, is_mine,
-                                                    alive_in, food_in, water_in, health_in, food_re, water_re,
-                                                    health_re, is_attack, freezed_in, attack_team, attack_id])
+                                                    alive_in, food_in, water_in, health_in, is_attack, freezed_in, attack_team, attack_id])
 
                 index += 1
 
@@ -227,17 +229,31 @@ class FeatureParser:  # 环境obs解析
 class RewardParser:
 
     def parse(self, prev_achv, achv):
+        # reward = {}
+        # for i in achv:
+        #     r = 0
+        #     for j in achv[i]:
+        #         if j == 'Foraging':
+        #             r += 1.2 * (achv[i][j] - prev_achv[i][j])
+        #         elif j == 'TimeAlive':
+        #             r += 0.85 * (achv[i][j] - prev_achv[i][j])
+        #         else:
+        #             r += (achv[i][j] - prev_achv[i][j])
+        #     reward[i] = r / 100
         reward = {}
-        for i in achv:
-            r = 0
-            for j in achv[i]:
-                if j == 'Foraging':
-                    r += 1.2 * (achv[i][j] - prev_achv[i][j])
-                elif j == 'TimeAlive':
-                    r += 0.85 * (achv[i][j] - prev_achv[i][j])
-                else:
-                    r += (achv[i][j] - prev_achv[i][j])
-            reward[i] = r / 100
+        for pid in achv:
+            pm, last_pm = achv[pid], prev_achv[pid]
+            r = (pm["Exploration"] - last_pm["Exploration"]) / 127.0 + \
+                (pm["Foraging"] - last_pm["Foraging"]) / 50.0
+            if pm["Equipment"] <= 20:
+                r += (pm["Equipment"] - last_pm["Equipment"]) / 20.0
+            else:
+                r += (pm["Equipment"] - last_pm["Equipment"]) / 40.0
+            if pm["PlayerDefeats"] <= 6:
+                r += (pm["PlayerDefeats"] - last_pm["PlayerDefeats"]) / 6.0
+            else:
+                r += (pm["PlayerDefeats"] - last_pm["PlayerDefeats"]) / 18.0
+            reward[pid] = r
         return reward
 
 
@@ -259,24 +275,6 @@ class TrainWrapper(Wrapper):
             key: np.zeros(shape=val.shape, dtype=val.dtype)
             for key, val in self.observation_space.items()
         }
-
-    # def reward(self, player):  # todo explore reward and https://neuralmmo.github.io/build/html/rst/tutorial.html#icon-rewards-tasks
-    #     # Default survival reward
-    #     reward, info = super().reward(player)
-    #
-    #     # Inject exploration attribute into player
-    #     if not hasattr(player, 'exploration'):
-    #         player.exploration = 0
-    #
-    #     # Historical exploration already part of player state
-    #     exploration = player.history.exploration
-    #
-    #     # Only reward agents for distance increment
-    #     # over previous farthest exploration
-    #     if exploration > player.exploration:
-    #         reward += 0.05 * (exploration - player.exploration)
-    #
-    #     return reward, info
 
     def reset(self):
         raw_obs = super().reset()

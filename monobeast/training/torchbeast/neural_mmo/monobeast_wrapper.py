@@ -28,7 +28,10 @@ class MonobeastWrapper:
 
     def initial(self):
         initial_frame = self.gym_env.reset()
-        output = self.format_output(initial_frame)
+        output = self.format_output(
+            initial_frame,
+            done={agent_id: 0
+                  for agent_id in self.gym_env.agents})
         self.episode_return = {agent_id: 0 for agent_id in self.gym_env.agents}
         self.episode_step = {agent_id: 0 for agent_id in self.gym_env.agents}
         return output
