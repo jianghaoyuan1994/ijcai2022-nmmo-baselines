@@ -1,3 +1,4 @@
 dm-tree==0.1.6
 ray[rllib]==1.10.0
 supersuit==3.3.5
+nmmo==1.5.3.17.a7

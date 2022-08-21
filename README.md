@@ -1,38 +1,29 @@
-# IJCAI2022-NMMO-BASELINES
-To get started with NeuralMMO environments and reinforcement learning frameworks, we provide some baseline agents.
+# My IJCAI2022-NMMO Completion Solution
+This solution was ranked 10 in the final evaluation at [here](https://www.aicrowd.com/challenges/ijcai-2022-the-neural-mmo-challenge/leaderboards).
 
-
-
-## install
+## Install
 ```bash
-pip install git+http://gitlab.aicrowd.com/henryz/ijcai2022nmmo.git
+#pip install git+http://gitlab.aicrowd.com/henryz/ijcai2022nmmo.git
 pip install -r requirements.txt
 ```
 
 
 ## monobeast-baseline
 
-**Important**: The monobeast baseline is merely a simple RL implementation and weaker than scripted AI. 
-
->  Change anything you like to make the baseline stronger e.g. **feature parser, reward parser, loss fucntion etc**.
-
-
-A modified [monobeast](https://github.com/facebookresearch/) baseline is provided in `monobeast/`. 
-- `monobeast/my-submission/`: Code for submission. 
-    - For successful submission, one must copy all files under this directory and the model checkpoint to [`ijcai2022-nmmo-starter-kit/my-submission/`](https://gitlab.aicrowd.com/neural-mmo/ijcai2022-nmmo-starter-kit/-/tree/main/my-submission).
-- `monobeast/training/`: Code for training.
-
 ### train
 ```bash
 cd monobeast/training
 python -m torchbeast.monobeast \
     --total_steps 1000000000 \
-    --num_actors 8 \
-    --num_learner 1 \
-    --batch_size 32 \
-    --unroll_length 64 \
-    --savedir ./results \
-    --checkpoint_interval 1800 \
+    --use_lstm \
+    --num_actors 15 \
+    --num_learner 1  \
+    --batch_size 32  \
+    --unroll_length 48 \
+    --savedir ./6_23_attack \
+    --learning_rate 0.001 \
+    --entropy_cost 0.001 \
+    --checkpoint_interval 3600 \
     --xpid nmmo
 ```
 
